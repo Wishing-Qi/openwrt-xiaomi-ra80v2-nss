@@ -48,6 +48,7 @@ define Device/xiaomi_ax3000-v2
 	PAGESIZE := 2048
 	NAND_SIZE := 128m
 	SOC := ipq5018
+	DEVICE_DTS := ipq5018-xiaomi-ax3000-v2
 	DEVICE_DTS_CONFIG := config@mp03.3
 	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-xiaomi_ax3000-v2 \
 		uboot-envtools zram-swap kmod-mtd-rw
