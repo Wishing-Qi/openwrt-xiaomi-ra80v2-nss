@@ -133,6 +133,17 @@ if ! grep -q 'xiaomi,ax3000-v2)' "$PLAT_SH"; then
     }' "$PLAT_SH"
 fi
 
+REGDB_MK="$OW/package/firmware/wireless-regdb/Makefile"
+if [ -f "$REGDB_MK" ] && ! grep -q '5150 - 5350 @ 160' "$REGDB_MK"; then
+    cat >> "$REGDB_MK" << 'EOF'
+
+define Build/Prepare
+	$(call Build/Prepare/Default)
+	python3 -c 'import re, pathlib; p = pathlib.Path("$(PKG_BUILD_DIR)/db.txt"); t = p.read_text(); t = re.sub(r"country CN:.*?(?=\n\t# 60 GHz|\n\n)", "country CN: DFS-FCC\n\t(2400 - 2483.5 @ 40), (30)\n\t(5150 - 5350 @ 160), (30)\n\t(5725 - 5850 @ 80), (33)", t, flags=re.S); p.write_text(t)'
+endef
+EOF
+fi
+
 # ---------------------------------------------------------------- 3. new files
 say "Copying files that do not exist upstream"
 ( cd "$HERE/openwrt/tree" && find . -type f -print0 |
