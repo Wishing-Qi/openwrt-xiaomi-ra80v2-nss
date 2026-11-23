@@ -1,4 +1,24 @@
 #!/bin/sh
+uci -q set system.@system[0].hostname='Xiaomi-AX3000'
+uci -q commit system
+
+# Switch default OpenWrt package feeds to USTC domestic mirror
+if [ -f /etc/apk/repositories.d/distfeeds.list ]; then
+	sed -i 's|https\?://downloads.openwrt.org|https://mirrors.ustc.edu.cn/openwrt|g' /etc/apk/repositories.d/distfeeds.list
+fi
+if [ -f /etc/opkg/distfeeds.conf ]; then
+	sed -i 's|https\?://downloads.openwrt.org|https://mirrors.ustc.edu.cn/openwrt|g' /etc/opkg/distfeeds.conf
+fi
+
+# Add ImmortalWrt 25.12 aarch64_cortex-a53 user-space feeds (via USTC mirror)
+if [ -d /etc/apk/repositories.d ] && ! grep -q 'immortalwrt' /etc/apk/repositories.d/customfeeds.list 2>/dev/null; then
+	cat >> /etc/apk/repositories.d/customfeeds.list << 'EOF'
+https://mirrors.ustc.edu.cn/immortalwrt/releases/25.12-SNAPSHOT/packages/aarch64_cortex-a53/luci/packages.adb
+https://mirrors.ustc.edu.cn/immortalwrt/releases/25.12-SNAPSHOT/packages/aarch64_cortex-a53/packages/packages.adb
+https://mirrors.ustc.edu.cn/immortalwrt/releases/25.12-SNAPSHOT/packages/aarch64_cortex-a53/routing/packages.adb
+EOF
+fi
+
 /etc/init.d/nss-offload enable
 /etc/init.d/nss-ecm enable
 exit 0

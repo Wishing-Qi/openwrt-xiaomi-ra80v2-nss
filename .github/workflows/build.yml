@@ -93,9 +93,11 @@ jobs:
           [ "$(git ls-remote "$FULLCONE_REPO" HEAD | cut -f1)" = "$FULLCONE_SHA" ] ||
               { echo "::error::fullcone master moved during this step, re-run it"; exit 1; }
 
-      - name: Add the Vantage theme and dashboard
+      - name: Add the Vantage theme and ImmortalWrt LuCI plugins
         env:
           VANTAGE_REPO: https://github.com/anothaDev/luci-theme-vantage.git
+          IMM_LUCI_REPO: https://github.com/immortalwrt/luci.git
+          IMM_CORE_REPO: https://github.com/immortalwrt/immortalwrt.git
         run: |
           set -eu
           git clone --depth 1 "$VANTAGE_REPO" vantage
@@ -109,6 +111,26 @@ jobs:
           cp -a vantage/luci-app-vantage openwrt/feeds/luci/applications/
           cp -a vantage/luci-app-vantage-traffic openwrt/feeds/luci/applications/
 
+          git clone --depth 1 --filter=blob:none --sparse "$IMM_LUCI_REPO" imm-luci
+          git -C imm-luci sparse-checkout set \
+              applications/luci-app-autoreboot \
+              applications/luci-app-cpufreq \
+              applications/luci-app-ramfree
+          for app in luci-app-autoreboot luci-app-cpufreq luci-app-ramfree; do
+            if [ -d "imm-luci/applications/$app" ]; then
+              cp -a "imm-luci/applications/$app" openwrt/feeds/luci/applications/
+            fi
+          done
+
+          git clone --depth 1 --filter=blob:none --sparse "$IMM_CORE_REPO" imm-core
+          git -C imm-core sparse-checkout set package/emortal/cpufreq
+          if [ -d imm-core/package/emortal/cpufreq ]; then
+            mkdir -p openwrt/package/emortal
+            cp -a imm-core/package/emortal/cpufreq openwrt/package/emortal/
+            sed -i 's|"qualcommax/ipq60xx"|"qualcommax/ipq50xx"\|\\\n\t"qualcommax/ipq60xx"|' \
+                openwrt/package/emortal/cpufreq/files/cpufreq.uci 2>/dev/null || true
+          fi
+
           cd openwrt
           ./scripts/feeds update -i luci
           ./scripts/feeds install -a -p luci
@@ -119,6 +141,17 @@ jobs:
           CONFIG_PACKAGE_luci-i18n-vantage-theme-zh-cn=y
           CONFIG_PACKAGE_luci-i18n-vantage-zh-cn=y
           CONFIG_PACKAGE_luci-i18n-vantage-traffic-zh-cn=y
+          CONFIG_PACKAGE_luci-app-upnp=y
+          CONFIG_PACKAGE_luci-i18n-upnp-zh-cn=y
+          CONFIG_PACKAGE_luci-app-ttyd=y
+          CONFIG_PACKAGE_luci-i18n-ttyd-zh-cn=y
+          CONFIG_PACKAGE_cpufreq=y
+          CONFIG_PACKAGE_luci-app-cpufreq=y
+          CONFIG_PACKAGE_luci-i18n-cpufreq-zh-cn=y
+          CONFIG_PACKAGE_luci-app-autoreboot=y
+          CONFIG_PACKAGE_luci-i18n-autoreboot-zh-cn=y
+          CONFIG_PACKAGE_luci-app-ramfree=y
+          CONFIG_PACKAGE_luci-i18n-ramfree-zh-cn=y
           EOF
           make defconfig
 
@@ -143,7 +176,12 @@ jobs:
             CONFIG_PACKAGE_luci-i18n-base-zh-cn \
             CONFIG_PACKAGE_luci-theme-vantage \
             CONFIG_PACKAGE_luci-app-vantage \
-            CONFIG_PACKAGE_luci-app-vantage-traffic
+            CONFIG_PACKAGE_luci-app-vantage-traffic \
+            CONFIG_PACKAGE_luci-app-upnp \
+            CONFIG_PACKAGE_luci-app-ttyd \
+            CONFIG_PACKAGE_luci-app-cpufreq \
+            CONFIG_PACKAGE_luci-app-autoreboot \
+            CONFIG_PACKAGE_luci-app-ramfree
           do
             if grep -q "^${sym}=y" .config; then
               echo "  ok   $sym"
