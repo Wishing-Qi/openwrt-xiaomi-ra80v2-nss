@@ -1,0 +1,419 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+
+/dts-v1/;
+
+#include "ipq5018.dtsi"
+#include "ipq5018-ess.dtsi"
+#include "ipq5018-qcn6122.dtsi"
+#include "ipq5018-nss.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	model = "Xiaomi AX3000 (v2)";
+	compatible = "xiaomi,ax3000-v2", "xiaomi,ax3000", "qcom,ipq5018";
+
+	aliases {
+		serial0 = &blsp1_uart1;
+		ethernet0 = &dp2;
+		ethernet1 = &dp1;
+		led-boot = &led_status_orange;
+		led-failsafe = &led_status_orange;
+		led-running = &led_status_blue;
+		led-upgrade = &led_status_orange;
+	};
+
+	chosen {
+		bootargs-append = " console=ttyMSM0,115200n8 ubi.mtd=rootfs root=/dev/ubiblock0_0 coherent_pool=2M";
+		stdout-path = "serial0:115200n8";
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&button_pins>;
+		pinctrl-names = "default";
+
+		button-reset {
+			label = "reset";
+			gpios = <&tlmm 38 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+			debounce-interval = <60>;
+		};
+
+		button-mesh {
+			label = "mesh";
+			gpios = <&tlmm 28 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_WPS_BUTTON>;
+			debounce-interval = <60>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-0 = <&leds_pins>;
+		pinctrl-names = "default";
+
+		led_status_blue: led-0 {
+			color = <LED_COLOR_ID_BLUE>;
+			function = LED_FUNCTION_STATUS;
+			gpios = <&tlmm 24 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_status_orange: led-1 {
+			color = <LED_COLOR_ID_ORANGE>;
+			function = LED_FUNCTION_STATUS;
+			gpios = <&tlmm 25 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_wan_blue: led-2 {
+			color = <LED_COLOR_ID_BLUE>;
+			function = LED_FUNCTION_WAN;
+			gpios = <&tlmm 26 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_wan_orange: led-3 {
+			color = <LED_COLOR_ID_ORANGE>;
+			function = LED_FUNCTION_WAN;
+			gpios = <&tlmm 27 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
+
+&blsp1_uart1 {
+	pinctrl-0 = <&uart0_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&crypto {
+	status = "okay";
+};
+
+&cryptobam {
+	status = "okay";
+};
+
+&prng {
+	status = "okay";
+};
+
+&qfprom {
+	status = "okay";
+};
+
+&qpic_bam {
+	status = "okay";
+};
+
+&qpic_nand {
+	status = "okay";
+
+	flash@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		nand-ecc-engine = <&qpic_nand>;
+		nand-ecc-strength = <8>;
+		nand-ecc-step-size = <512>;
+		nand-bus-width = <8>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "0:SBL1";
+				reg = <0x0 0x80000>;
+				read-only;
+			};
+
+			partition@80000 {
+				label = "0:MIBIB";
+				reg = <0x80000 0x80000>;
+				read-only;
+			};
+
+			partition@100000 {
+				label = "0:BOOTCONFIG";
+				reg = <0x100000 0x40000>;
+				read-only;
+			};
+
+			partition@140000 {
+				label = "0:BOOTCONFIG1";
+				reg = <0x140000 0x40000>;
+				read-only;
+			};
+
+			partition@180000 {
+				label = "0:QSEE";
+				reg = <0x180000 0x100000>;
+				read-only;
+			};
+
+			partition@280000 {
+				label = "0:QSEE_1";
+				reg = <0x280000 0x100000>;
+				read-only;
+			};
+
+			partition@380000 {
+				label = "0:DEVCFG";
+				reg = <0x380000 0x40000>;
+				read-only;
+			};
+
+			partition@3c0000 {
+				label = "0:DEVCFG_1";
+				reg = <0x3c0000 0x40000>;
+				read-only;
+			};
+
+			partition@400000 {
+				label = "0:CDT";
+				reg = <0x400000 0x40000>;
+				read-only;
+			};
+
+			partition@440000 {
+				label = "0:CDT_1";
+				reg = <0x440000 0x40000>;
+				read-only;
+			};
+
+			partition@480000 {
+				label = "0:APPSBLENV";
+				reg = <0x480000 0x80000>;
+			};
+
+			partition@500000 {
+				label = "0:APPSBL";
+				reg = <0x500000 0x140000>;
+				read-only;
+			};
+
+			partition@640000 {
+				label = "0:APPSBL_1";
+				reg = <0x640000 0x140000>;
+				read-only;
+			};
+
+			partition@780000 {
+				label = "0:ART";
+				reg = <0x780000 0x100000>;
+				read-only;
+
+				nvmem-layout {
+					compatible = "fixed-layout";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					macaddr_art_0: macaddr@0 {
+						reg = <0x0 0x6>;
+					};
+
+					macaddr_art_6: macaddr@6 {
+						reg = <0x6 0x6>;
+					};
+
+					caldata@1000 {
+						reg = <0x1000 0x20000>;
+					};
+
+					caldata@26800 {
+						reg = <0x26800 0x20000>;
+					};
+				};
+			};
+
+			partition@880000 {
+				label = "0:TRAINING";
+				reg = <0x880000 0x80000>;
+				read-only;
+			};
+
+			partition@900000 {
+				label = "bdata";
+				reg = <0x900000 0x80000>;
+			};
+
+			partition@980000 {
+				label = "crash";
+				reg = <0x980000 0x80000>;
+			};
+
+			partition@a00000 {
+				label = "crash_syslog";
+				reg = <0xa00000 0x80000>;
+			};
+
+			partition@a80000 {
+				label = "ubi_kernel";
+				reg = <0xa80000 0x1e00000>;
+			};
+
+			partition@2880000 {
+				label = "rootfs";
+				reg = <0x2880000 0x5780000>;
+			};
+		};
+	};
+};
+
+&tlmm {
+	uart0_pins: uart0-state {
+		pins = "gpio20", "gpio21";
+		function = "blsp0_uart0";
+		bias-disable;
+	};
+
+	mdio1_pins: mdio-state {
+		mdc-pins {
+			pins = "gpio36";
+			function = "mdc";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+
+		mdio-pins {
+			pins = "gpio37";
+			function = "mdio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+
+	switch_reset_pins: switch-reset-pins {
+		pins = "gpio39";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-down;
+	};
+
+	button_pins: button-pins {
+		pins = "gpio28", "gpio38";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	leds_pins: leds-pins {
+		pins = "gpio24", "gpio25", "gpio26", "gpio27";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-down;
+	};
+};
+
+&tsens {
+	status = "okay";
+};
+
+&thermal_zones {
+	status = "okay";
+};
+
+&mdio0 {
+	status = "okay";
+
+	ge_phy: ethernet-phy@7 {
+		compatible = "ethernet-phy-id004d.d0c0";
+		reg = <7>;
+		resets = <&gcc GCC_GEPHY_MDC_SW_ARES>;
+		qcom,dac-preset-short-cable;
+	};
+};
+
+&mdio1 {
+	status = "okay";
+	pinctrl-0 = <&mdio1_pins &switch_reset_pins>;
+	pinctrl-names = "default";
+	reset-gpios = <&tlmm 39 GPIO_ACTIVE_LOW>;
+	reset-assert-us = <10000>;
+	reset-deassert-us = <50000>;
+
+	/*
+	 * Motorcomm YT9215 switch at SMI address 0x1d, initialized in Option B
+	 * Dual-Conduit Untagged Raw Ethernet mode by yt9215-ra80v2:
+	 *   - Port 3 (WAN)      <---> Port 4 (Internal PHY -> dp1 / eth1)
+	 *   - Port 0, 1, 2 (LAN)<---> Port 8 (Rev-SGMII 1000M -> dp2 / eth0)
+	 *   - CPU tag (0x9988) disabled so NSS offloads standard Ethernet frames.
+	 */
+	switch@1d {
+		compatible = "motorcomm,yt9215-ra80v2";
+		reg = <0x1d>;
+	};
+};
+
+&ess_switch {
+	status = "okay";
+	cmnblk_clk = "internal_96MHz";
+	switch_mac_mode = <0xf>;
+
+	qcom,port_phyinfo {
+		port@0 {
+			port_id = <1>;
+			mdiobus = <&mdio0>;
+			phy_address = <7>;
+			phy_dac = <0x10 0x10>;
+		};
+
+		port@1 {
+			port_id = <2>;
+			forced-speed = <1000>;
+			forced-duplex = <1>;
+		};
+	};
+};
+
+/* GMAC0 -> Internal GE PHY -> YT9215 Port 4 -> Rear WAN (Port 3) [eth1] */
+&dp1 {
+	status = "okay";
+	phy-mode = "internal";
+	phy-handle = <&ge_phy>;
+	nvmem-cells = <&macaddr_art_0>;
+	nvmem-cell-names = "mac-address";
+};
+
+/* GMAC1 -> Uniphy SGMII -> YT9215 Port 8 -> Rear LAN 1..3 (Port 0..2) [eth0] */
+&dp2 {
+	status = "okay";
+	phy-mode = "sgmii";
+	nvmem-cells = <&macaddr_art_6>;
+	nvmem-cell-names = "mac-address";
+
+	fixed-link {
+		speed = <1000>;
+		full-duplex;
+		pause;
+		asym-pause;
+	};
+};
+
+&q6v5_wcss {
+	status = "okay";
+	boot-args = <0x2 0x4 0x2 0x12 0x0 0x0>;
+};
+
+&wifi {
+	status = "okay";
+	qcom,rproc = <&q6_wcss_pd1>;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd1";
+	qcom,ath11k-fw-memory-mode = <2>;
+	qcom,bdf-addr = <0x4c400000>;
+	qcom,ath11k-calibration-variant = "Xiaomi-AX3000-v2";
+};
+
+&wifi1 {
+	status = "okay";
+	qcom,rproc = <&q6_wcss_pd2>;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd2";
+	qcom,ath11k-fw-memory-mode = <2>;
+	qcom,bdf-addr = <0x4d100000>;
+	qcom,m3-dump-addr = <0x4df00000>;
+	qcom,ath11k-calibration-variant = "Xiaomi-AX3000-v2";
+};

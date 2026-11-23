@@ -39,12 +39,7 @@ define Package/qca-ssdk-shell/description
  has no way to carry an extended option list over netlink, so that attribute
  is registered but not settable from `swconfig`.
 
- On cmcc,pz-l8 device 0 is the IPQ5018 internal ESS and device 1 the external
- QCA8337, e.g.:
-
-     ssdk_sh dev 1 port ctrl status get 5     # the MDI link to GMAC0/eth0
-     ssdk_sh dev 1 vlan entry show
-     ssdk_sh dev 1 fdb entry show
+ On xiaomi,ax3000-v2 (RA80v2) device 0 is the IPQ5018 internal ESS / Uniphy.
 endef
 
 # ssdk-shell's own ./config already defaults every IN_* feature to TRUE and

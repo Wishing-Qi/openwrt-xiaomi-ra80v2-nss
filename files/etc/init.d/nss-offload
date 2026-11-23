@@ -30,10 +30,10 @@ PBUF_EXTRA=800000        # vendor MP_256 value; 256 MB board
 # towards the high water mark, so a mark above the cap undoes the cap.  That is
 # real and measurable - 28.5 MB free against 35.3, about 7 MB.
 #
-# Restored anyway.  Both reference images measured on this board run 16336
-# against a 4096 pool: v1.6 (CMCC 4.4 SDK) and nwrt (5.4).  Two independent
-# builds pay the 7 MB deliberately; being the only one that does not is worth
-# less than the memory saved.
+# Restored anyway.  Reference images measured on 256 MB IPQ5018 boards run
+# 16336 against a 4096 pool: QSDK 4.4 and 5.4.  Two independent builds pay
+# the 7 MB deliberately; being the only one that does not is worth less than
+# the memory saved.
 PBUF_HIGH_WATER=16336
 
 # How many empty skbs the NSS core keeps pooled.  The driver derives this from

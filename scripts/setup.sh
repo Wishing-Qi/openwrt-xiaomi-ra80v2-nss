@@ -1,19 +1,7 @@
 #!/bin/bash
-# Turn a clean OpenWrt v25.12.5 checkout into a buildable pz-l8 NSS tree.
+# Turn a clean OpenWrt v25.12.5 checkout into a buildable Xiaomi AX3000 (RA80 v2) NSS tree.
 #
 # Usage:  scripts/setup.sh /path/to/openwrt
-#
-# Everything this project changes falls into five buckets:
-#   1. edits to files OpenWrt already ships   -> openwrt/0001-cmcc-pz-l8-nss.patch
-#   2. files OpenWrt does not have            -> openwrt/tree/, copied in place
-#   3. our own packages                       -> feed/, wired in as a feed
-#   4. patches to packages in other feeds     -> openwrt/feeds/, copied once the
-#                                                feeds exist
-#   5. rootfs overlay + config seed           -> files/, config/
-#
-# Idempotent: re-running on an already-prepared tree is a no-op for 1 and safe
-# for the rest, including .config - an existing one is kept, so a menuconfig
-# selection survives.  RESEED=1 goes back to the seed.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -36,11 +24,113 @@ fi
 
 # ---------------------------------------------------------------- 2. tracked edits
 say "Applying edits to upstream files"
-PATCH="$HERE/openwrt/0001-cmcc-pz-l8-nss.patch"
+PATCH="$HERE/openwrt/0001-xiaomi-ra80v2-nss.patch"
 if git -C "$OW" apply --reverse --check "$PATCH" 2>/dev/null; then
     echo "already applied, skipping"
 else
     git -C "$OW" apply --verbose "$PATCH"
+fi
+
+# ---------------------------------------------------------------- 2b. Xiaomi AX3000 v2 (RA80 v2) target integration
+say "Integrating Xiaomi AX3000 v2 (RA80 v2) target & base-files"
+
+IPQ_MK="$OW/target/linux/qualcommax/image/ipq50xx.mk"
+if ! grep -q 'Device/xiaomi_ax3000-v2' "$IPQ_MK"; then
+    cat >> "$IPQ_MK" << 'EOF'
+
+define Device/xiaomi_ax3000-v2
+	$(call Device/FitImageLzma)
+	$(call Device/UbiFit)
+	DEVICE_VENDOR := Xiaomi
+	DEVICE_MODEL := AX3000
+	DEVICE_VARIANT := v2
+	BLOCKSIZE := 128k
+	PAGESIZE := 2048
+	NAND_SIZE := 128m
+	SOC := ipq5018
+	DEVICE_DTS_CONFIG := config@mp03.3
+	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-xiaomi_ax3000-v2 \
+		uboot-envtools zram-swap kmod-mtd-rw
+endef
+TARGET_DEVICES += xiaomi_ax3000-v2
+EOF
+fi
+
+LEDS_SH="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/board.d/01_leds"
+if ! grep -q 'xiaomi,ax3000-v2)' "$LEDS_SH"; then
+    sed -i '/case "\$board" in/a \
+xiaomi,ax3000-v2)\
+\tucidef_set_led_netdev "wan-blue" "WAN-BLUE" "blue:wan" "eth1" "tx rx link_1000"\
+\tucidef_set_led_netdev "wan-orange" "WAN-ORANGE" "orange:wan" "eth1" "link_10 link_100"\
+\t;;' "$LEDS_SH"
+fi
+
+NET_SH="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network"
+if ! grep -q 'xiaomi,ax3000-v2)' "$NET_SH"; then
+    sed -i '/case \$board in/a \
+\txiaomi,ax3000-v2)\
+\t\t# Option B Dual-Conduit Untagged Raw Ethernet on Motorcomm YT9215:\
+\t\t#   dp2 (eth0) <- Port 8 (SGMII) <- LAN 1..3 (Port 0..2)\
+\t\t#   dp1 (eth1) <- Port 4 (GE PHY) <- WAN (Port 3)\
+\t\tucidef_set_interfaces_lan_wan "eth0" "eth1"\
+\t\t;;' "$NET_SH"
+fi
+
+CAL_SH="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata"
+if ! grep -q 'xiaomi,ax3000-v2)' "$CAL_SH"; then
+    sed -i '/"ath11k\/IPQ5018\/hw1.0\/cal-ahb-c000000.wifi.bin")/,/esac/{
+        /case "\$board" in/a \
+\txiaomi,ax3000-v2)\
+\t\tcaldata_extract "0:ART" 0x1000 0x20000\
+\t\t;;
+    }' "$CAL_SH"
+    sed -i '/"ath11k\/QCN6122\/hw1.0\/cal-ahb-b00a040.wifi.bin")/,/esac/{
+        /case "\$board" in/a \
+\txiaomi,ax3000-v2)\
+\t\tcaldata_extract "0:ART" 0x26800 0x20000\
+\t\t;;
+    }' "$CAL_SH"
+fi
+
+UBOOTENV_SH="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/uci-defaults/30_uboot-envtools"
+if [ -f "$UBOOTENV_SH" ] && ! grep -q 'xiaomi,ax3000-v2)' "$UBOOTENV_SH"; then
+    sed -i '/case "\$board" in/a \
+xiaomi,ax3000-v2)\
+\tubootenv_add_mtd "0:APPSBLENV" "0x0" "0x10000" "0x20000"\
+\t;;' "$UBOOTENV_SH"
+fi
+
+BOOTCOUNT_SH="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/init.d/bootcount"
+if [ -f "$BOOTCOUNT_SH" ] && ! grep -q 'xiaomi,ax3000-v2)' "$BOOTCOUNT_SH"; then
+    sed -i '/case \$(board_name) in/a \
+\txiaomi,ax3000-v2)\
+\t\t[ "$(fw_printenv -n bootcmd 2>/dev/null)" = "bootmiwifi" ] || return 0\
+\t\t[ "$(fw_printenv -n flag_ota_reboot 2>/dev/null)" = "0" ] || fw_setenv flag_ota_reboot 0\
+\t\t[ "$(fw_printenv -n flag_boot_success 2>/dev/null)" = "1" ] || fw_setenv flag_boot_success 1\
+\t\t[ "$(fw_printenv -n flag_try_sys1_failed 2>/dev/null)" = "0" ] || fw_setenv flag_try_sys1_failed 0\
+\t;;' "$BOOTCOUNT_SH"
+fi
+
+PLAT_SH="$OW/target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh"
+if ! grep -q 'xiaomi,ax3000-v2)' "$PLAT_SH"; then
+    sed -i '/platform_do_upgrade() {/,/esac/{
+        /case "\$(board_name)" in/a \
+\txiaomi,ax3000-v2)\
+\t\tif [ "$(fw_printenv -n bootcmd 2>/dev/null)" = "bootmiwifi" ]; then\
+\t\t\tfw_setenv boot_wait on\
+\t\t\tfw_setenv uart_en 1\
+\t\t\tfw_setenv flag_boot_rootfs 0\
+\t\t\tfw_setenv flag_last_success 0\
+\t\t\tfw_setenv flag_boot_success 1\
+\t\t\tfw_setenv flag_try_sys1_failed 0\
+\t\t\tfw_setenv flag_try_sys2_failed 0\
+\t\tfi\
+\t\tCI_KERN_UBIPART="ubi_kernel"\
+\t\tCI_ROOT_UBIPART="rootfs"\
+\t\tCI_DATA_UBIPART="rootfs"\
+\t\tnand_do_upgrade "$1"\
+\t\t;;
+    }' "$PLAT_SH"
 fi
 
 # ---------------------------------------------------------------- 3. new files
@@ -52,20 +142,17 @@ say "Copying files that do not exist upstream"
   done )
 
 # ---------------------------------------------------------------- 4. feed
-say "Registering the pzl8 package feed"
+say "Registering the custom NSS package feed"
 FEEDS="$OW/feeds.conf"
 [ -f "$FEEDS" ] || cp "$OW/feeds.conf.default" "$FEEDS"
-grep -q '^src-link pzl8 ' "$FEEDS" ||
-    echo "src-link pzl8 $HERE/feed" >> "$FEEDS"
-grep '^src-link pzl8 ' "$FEEDS"
+grep -q '^src-link ra80v2 ' "$FEEDS" ||
+    echo "src-link ra80v2 $HERE/feed" >> "$FEEDS"
+grep '^src-link ra80v2 ' "$FEEDS"
 
 ( cd "$OW" && ./scripts/feeds update -a >/dev/null && ./scripts/feeds install -a >/dev/null )
 echo "feeds updated and installed"
 
 # ---------------------------------------------------------------- 5. feed package patches
-# These cannot live in openwrt/tree/: that is copied before the feeds exist, and
-# scripts/feeds deletes a feed directory that is not yet a checkout before it
-# clones into it.  After an update they are simply copied again.
 say "Adding patches to packages from other feeds"
 ( cd "$HERE/openwrt/feeds" && find . -type f -print0 |
   while IFS= read -r -d '' f; do
@@ -77,32 +164,28 @@ say "Adding patches to packages from other feeds"
 say "Installing the rootfs overlay"
 mkdir -p "$OW/files"
 cp -a "$HERE/files/." "$OW/files/"
+if [ -f "$OW/files/usr/lib/lua/luci/i18n/pzl8.zh-cn.lmo" ] && [ ! -f "$OW/files/usr/lib/lua/luci/i18n/ra80v2.zh-cn.lmo" ]; then
+    mv "$OW/files/usr/lib/lua/luci/i18n/pzl8.zh-cn.lmo" "$OW/files/usr/lib/lua/luci/i18n/ra80v2.zh-cn.lmo"
+fi
+find "$OW/files" -name '*pzl8*' -delete 2>/dev/null || true
 find "$OW/files" -type f | sed "s|$OW/|  |"
-# init scripts must stay executable through the image build
 chmod +x "$OW"/files/etc/init.d/* 2>/dev/null || true
-# rpcd runs these as programs; a 644 plugin never registers its ubus object
 chmod +x "$OW"/files/usr/libexec/rpcd/* 2>/dev/null || true
 
 # ---------------------------------------------------------------- 7. config
-# An existing .config is someone's menuconfig session and is left alone.
-# RESEED=1 throws it away and starts from the seed again.
 if [ -f "$OW/.config" ] && [ "${RESEED:-0}" != 1 ]; then
     say "Keeping the existing .config  (RESEED=1 to replace it with the seed)"
 else
     say "Seeding .config"
-    cp "$HERE/config/cmcc_pz-l8.config" "$OW/.config"
+    cp "$HERE/config/xiaomi_ra80v2.config" "$OW/.config"
 fi
 
-# Always run this: it fills in defaults for anything new since the config was
-# written, which is the point of re-running setup.sh at all.
 ( cd "$OW" && make defconfig >/dev/null )
 grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET|PROFILE)' "$OW/.config" || true
 
-# These are not packages, so nothing reminds you about them in menuconfig, and
-# make defconfig will not put them back if they get turned off.  The workflow
-# checks the same list.
 missing=0
 for sym in \
+    CONFIG_TARGET_qualcommax_ipq50xx_DEVICE_xiaomi_ax3000-v2 \
     CONFIG_NSS_DRV_WIFIOFFLOAD_ENABLE \
     CONFIG_NSS_FIRMWARE_VERSION_12_5 \
     CONFIG_PACKAGE_kmod-qca-nss-drv \
@@ -113,12 +196,9 @@ done
 if [ "$missing" != 0 ]; then
     echo
     echo "WARNING: the above are required by the NSS offload in this tree."
-    echo "         Without WIFIOFFLOAD, qca-nss-drv is built with no wifili and"
-    echo "         ath11k.ko fails to link.  Without the 12.5 firmware choice the"
-    echo "         build succeeds and the wifili peer-stats ABI is silently wrong."
     echo "         Re-enable them in menuconfig, or run RESEED=1 $0 $OW"
 fi
 
 say "Ready.  Build with:  cd $OW && make -j\$(nproc)"
 echo "        Pick packages with:  cd $OW && make menuconfig"
-echo "        Keep your selection: cd $OW && ./scripts/diffconfig.sh > $HERE/config/cmcc_pz-l8.config"
+echo "        Keep your selection: cd $OW && ./scripts/diffconfig.sh > $HERE/config/xiaomi_ra80v2.config"

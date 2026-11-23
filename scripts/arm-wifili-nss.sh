@@ -1,5 +1,5 @@
 #!/bin/sh
-# Arm the QSDK NSS wifili offload on the CMCC PZ-L8, by hand.
+# Arm the QSDK NSS wifili offload on the Xiaomi AX3000 (RA80v2), by hand.
 #
 # NOT the normal path any more.  A stock boot arms both radios on its own -
 # see docs/WIFILI.md, "How to run it".  This is for a box that booted with the

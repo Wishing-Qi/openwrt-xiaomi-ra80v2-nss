@@ -1,4 +1,4 @@
-name: Build CMCC PZ-L8 (NSS)
+name: Build Xiaomi AX3000 (RA80 v2 NSS)
 
 on:
   push:
@@ -27,10 +27,6 @@ env:
   OPENWRT_REF: ${{ github.event.inputs.openwrt_ref || 'v25.12.5' }}
   TZ: Asia/Shanghai
 
-# One build per branch. A newer push cancels the older run rather than racing
-# it to the Releases page - both would publish with make_latest, and the loser
-# of that race is whichever finishes second, not whichever is newer. Manual
-# runs get their own group per run id so a push cannot cancel them.
 concurrency:
   group: build-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
@@ -39,8 +35,6 @@ jobs:
   build:
     runs-on: ubuntu-24.04
 
-    # Only the release step needs this, and without it GITHUB_TOKEN is
-    # read-only by default and action-gh-release fails with 403.
     permissions:
       contents: write
 
@@ -48,11 +42,10 @@ jobs:
       - name: Checkout this project
         uses: actions/checkout@v4
         with:
-          path: pzl8-nss
+          path: ra80v2-nss
 
       - name: Free up disk space
         run: |
-          # An OpenWrt build needs well over the ~14 GB a stock runner leaves free.
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost /usr/lib/jvm "$AGENT_TOOLSDIRECTORY"
           sudo docker image prune -af || true
@@ -77,17 +70,9 @@ jobs:
           fetch-depth: 0
 
       - name: Prepare the tree
-        # No chmod here on purpose: git records setup.sh as 100755 and
-        # actions/checkout preserves it, so if this ever fails with Permission
-        # denied the repository has lost the bit and that is worth seeing.
         run: |
-          pzl8-nss/scripts/setup.sh "$GITHUB_WORKSPACE/openwrt"
+          bash ra80v2-nss/scripts/setup.sh "$GITHUB_WORKSPACE/openwrt"
 
-      # SONiC fullcone NAT from openwrt-sonic-fullcone: its kernel, libnftnl,
-      # nftables and fw4 patches and the LuCI options, put in place by that
-      # project's own script.  CI-only for the same reason as Argon below.  There
-      # is nothing to select afterwards - it builds into nft_masq, xt_MASQUERADE
-      # and packages the image already has - and the image ships with it off.
       - name: Add SONiC fullcone NAT
         env:
           FULLCONE_REPO: https://github.com/mufeng05/openwrt-sonic-fullcone
@@ -95,30 +80,19 @@ jobs:
           set -euo pipefail
           git clone --depth 1 "$FULLCONE_REPO" fullcone
 
-          # Tracking master, so record what that actually was for this image.
           FULLCONE_SHA=$(git -C fullcone rev-parse HEAD)
           git -C fullcone --no-pager log -1 --format='fullcone %h  %ci  %s'
           echo "FULLCONE_COMMIT=$(git -C fullcone rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
-          # Needs the feeds installed, which setup.sh has done.
           ( cd openwrt && bash "$GITHUB_WORKSPACE/fullcone/add_sonic_fullcone.sh" ) |
               tee "$RUNNER_TEMP/fullcone.log"
 
-          # The script skips whatever it cannot place and still exits 0.  An
-          # image that says fullcone and has none is worse than a failed build.
           grep -q '=== Done: [0-9]* applied, 0 skipped ===' "$RUNNER_TEMP/fullcone.log" ||
               { echo "::error::add_sonic_fullcone.sh skipped something"; exit 1; }
 
-          # It clones master again by itself, seconds after the clone above.  If
-          # master moved in between, the commit recorded above is not the one
-          # that was applied.
           [ "$(git ls-remote "$FULLCONE_REPO" HEAD | cut -f1)" = "$FULLCONE_SHA" ] ||
               { echo "::error::fullcone master moved during this step, re-run it"; exit 1; }
 
-      # Argon is not in OpenWrt's luci feed, so it is cloned here rather than by
-      # setup.sh - a local build should not depend on a network fetch it did not
-      # ask for, and the seed config stays free of a symbol that only resolves
-      # in CI.  The package lives in package/ and needs no feed machinery.
       - name: Add the Argon theme
         env:
           ARGON_REPO: https://github.com/jerrykuku/luci-theme-argon.git
@@ -126,7 +100,6 @@ jobs:
           set -eu
           git clone --depth 1 "$ARGON_REPO" openwrt/package/luci-theme-argon
 
-          # Tracking master, so record what that actually was for this image.
           ARGON_COMMIT=$(git -C openwrt/package/luci-theme-argon \
                              rev-parse --short HEAD)
           git -C openwrt/package/luci-theme-argon --no-pager log -1 \
@@ -142,6 +115,8 @@ jobs:
           cd openwrt
           missing=0
           for sym in \
+            CONFIG_TARGET_qualcommax_ipq50xx_DEVICE_xiaomi_ax3000-v2 \
+            CONFIG_PACKAGE_ipq-wifi-xiaomi_ax3000-v2 \
             CONFIG_PACKAGE_kmod-qca-nss-drv \
             CONFIG_PACKAGE_kmod-qca-nss-ecm \
             CONFIG_PACKAGE_kmod-qca-mcs \
@@ -150,6 +125,8 @@ jobs:
             CONFIG_PACKAGE_nss-firmware-ipq50xx \
             CONFIG_NSS_DRV_WIFIOFFLOAD_ENABLE \
             CONFIG_NSS_FIRMWARE_VERSION_12_5 \
+            CONFIG_PACKAGE_zram-swap \
+            CONFIG_PACKAGE_kmod-mtd-rw \
             CONFIG_LUCI_LANG_zh_Hans \
             CONFIG_PACKAGE_luci-i18n-base-zh-cn \
             CONFIG_PACKAGE_luci-theme-argon
@@ -166,7 +143,6 @@ jobs:
         run: |
           cd openwrt
           make download -j8 V=s 2>&1 | grep -iE '^(Downloading|ERROR|.*failed)' || true
-          # a zero-length download is a silent poison pill later in the build
           find dl -size -1024c -type f -print -delete || true
 
       - name: Build
@@ -185,13 +161,11 @@ jobs:
           {
             echo "openwrt_ref=$OPENWRT_REF"
             echo "openwrt_commit=$(git rev-parse --short HEAD)"
-            echo "project_commit=$(git -C "$GITHUB_WORKSPACE/pzl8-nss" rev-parse --short HEAD)"
+            echo "project_commit=$(git -C "$GITHUB_WORKSPACE/ra80v2-nss" rev-parse --short HEAD)"
             echo "argon_commit=${ARGON_COMMIT:-none}"
             echo "fullcone_commit=${FULLCONE_COMMIT:-none}"
             echo "date=$(date -u '+%Y-%m-%d %H:%M UTC')"
           } | tee "$GITHUB_WORKSPACE/build-info.txt"
-          # Seconds, because this is the tag: at minute resolution two runs
-          # finishing in the same minute ask GitHub for the same tag name.
           echo "DATE=$(date '+%Y%m%d_%H%M%S')" >> "$GITHUB_ENV"
           echo "FIRMWARE=$GITHUB_WORKSPACE/openwrt/bin/targets/qualcommax/ipq50xx" >> "$GITHUB_ENV"
 
@@ -199,75 +173,25 @@ jobs:
         if: success()
         run: ls -lh "$FIRMWARE" && cat openwrt/bin/targets/qualcommax/ipq50xx/*.manifest | head -40
 
-      # The bootloader's web recovery page does not take a .ubi.  It runs
-      # `imgaddr=$fileaddr && source $imgaddr:script` on the upload, so the
-      # payload has to be a FIT carrying its own flashing script; a raw ubinized
-      # image reports success and writes nothing.  See docs/RECOVERY.md.
-      - name: Build the U-Boot recovery image
-        if: success()
-        run: |
-          set -eu
-          UBI=$(ls "$FIRMWARE"/*-squashfs-factory.ubi)
-          BASE=$(basename "$UBI" -squashfs-factory.ubi)
-          MIBIB="$GITHUB_WORKSPACE/pzl8-nss/scripts/pz-l8-116m-mibib.bin"
-
-          # Two variants, see docs/RECOVERY.md:
-          #   -uboot-recovery.fit       writes rootfs only. Correct on the single
-          #                             110M layout (this project's, and nwrt's).
-          #   -uboot-recovery-116m.fit  also writes the 110M partition table first,
-          #                             converting a genuine A/B factory board. The
-          #                             MIBIB is read back and byte-compared before
-          #                             rootfs is touched; still, writing MIBIB can
-          #                             hard-brick on power loss, which is why it is
-          #                             a separate, clearly-named file rather than
-          #                             the default.
-          build_fit() {   # <out.fit> [mibib.bin]
-            # OW first so a build tree's own mkimage wins; the apt ones are the
-            # fallback and work equally well.
-            OW="$GITHUB_WORKSPACE/openwrt" \
-              python3 "$GITHUB_WORKSPACE/pzl8-nss/scripts/mkrecovery.py" "$UBI" "$1" ${2:+"$2"}
-            # The bootloader refuses anything over 32 MiB, so a FIT that grew past
-            # it would be published and then rejected at the one moment it is
-            # needed.  Fail the build instead.
-            SIZE=$(stat -c %s "$1")
-            echo "$(basename "$1"): $SIZE bytes"
-            if [ "$SIZE" -gt 33554432 ]; then
-              echo "::error::$(basename "$1") is $SIZE bytes; U-Boot refuses over 0x2000000"
-              exit 1
-            fi
-            ( cd "$FIRMWARE" && sha256sum -b "$(basename "$1")" >> sha256sums )
-          }
-
-          build_fit "$FIRMWARE/$BASE-uboot-recovery.fit"
-          build_fit "$FIRMWARE/$BASE-uboot-recovery-116m.fit" "$MIBIB"
-          ls -lh "$FIRMWARE"/*-uboot-recovery*.fit
-
       - name: Write the release notes
         if: success()
         run: |
           cd "$GITHUB_WORKSPACE"
           IPQ=openwrt/bin/targets/qualcommax/ipq50xx
           {
-            echo "OpenWrt \`$OPENWRT_REF\` with Qualcomm NSS offload for the CMCC PZ-L8."
+            echo "OpenWrt \`$OPENWRT_REF\` with Qualcomm NSS (NPU) hardware offload for **Xiaomi AX3000 (RA80 v2)**."
             echo
             echo "| file | use |"
             echo "|---|---|"
-            echo "| \`*-squashfs-sysupgrade.bin\` | upgrading a router that already runs OpenWrt - \`sysupgrade -n\` |"
-            echo "| \`*-uboot-recovery.fit\` | **the U-Boot web recovery at 192.168.10.10** - the only file that page accepts |"
-            echo "| \`*-uboot-recovery-116m.fit\` | same page, but **also writes the 110M partition table** to convert a genuine A/B factory board (see [docs/RECOVERY.md](docs/RECOVERY.md); can brick on power loss mid-write) |"
-            echo "| \`*-squashfs-factory.ubi\` | a forced \`sysupgrade -n -F\` from a vendor image, which writes it with \`ubiformat\` |"
-            echo "| \`*-initramfs-uImage.itb\` | boots from RAM without touching flash, for recovery |"
+            echo "| \`*-squashfs-sysupgrade.bin\` | upgrading a Xiaomi AX3000 (RA80 v2) already running OpenWrt / ImmortalWrt - \`sysupgrade -n\` |"
+            echo "| \`*-initramfs-uImage.itb\` | boots from RAM without touching flash, for testing / recovery |"
             echo
-            echo "Default LAN address is **192.168.10.1**."
+            echo "Default LAN address is **192.168.31.1**."
+            echo "Default Wi-Fi SSIDs: **Xiaomi-AX3000-2.4G-XXXX** / **Xiaomi-AX3000-5G-XXXX** (password: \`12345678\`)."
             echo
             echo "Includes [SONiC fullcone NAT](https://github.com/mufeng05/openwrt-sonic-fullcone),"
             echo "**off by default**: tick Fullcone NAT under Network > Firewall > General"
             echo "Settings, then in the wan zone's settings."
-            echo
-            echo "The U-Boot page does **not** take a \`.ubi\`: it runs"
-            echo "\`source \$imgaddr:script\` on the upload, so a raw image reports"
-            echo "success and writes nothing. Use the \`.fit\`. Both routes, and the"
-            echo "flash layout, are in [docs/RECOVERY.md](docs/RECOVERY.md)."
             echo
             echo '```'
             cat build-info.txt
@@ -275,7 +199,7 @@ jobs:
             echo
             echo "sha256:"
             echo '```'
-            grep -E 'sysupgrade\.bin|factory\.ubi|initramfs-uImage\.itb|uboot-recovery.*\.fit' $IPQ/sha256sums || cat $IPQ/sha256sums
+            grep -E 'sysupgrade\.bin|initramfs-uImage\.itb' $IPQ/sha256sums || cat $IPQ/sha256sums
             echo '```'
           } > release-notes.md
           cat release-notes.md
@@ -284,19 +208,15 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: cmcc_pz-l8-nss_${{ env.DATE }}
+          name: xiaomi_ra80v2-nss_${{ env.DATE }}
           path: |
             ${{ env.FIRMWARE }}/*.bin
-            ${{ env.FIRMWARE }}/*.ubi
-            ${{ env.FIRMWARE }}/*.fit
+            ${{ env.FIRMWARE }}/*.itb
             ${{ env.FIRMWARE }}/*.manifest
             ${{ env.FIRMWARE }}/sha256sums
             build-info.txt
           if-no-files-found: error
 
-      # Every green build of main gets a release, because run artifacts expire
-      # and need a login to fetch.  Pull requests do not, and a manual run can
-      # opt out by unticking make_release.
       - name: Publish release
         if: >-
           success() && github.ref == 'refs/heads/main' &&
@@ -306,13 +226,11 @@ jobs:
         uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: build-${{ env.DATE }}
-          name: CMCC PZ-L8 NSS ${{ env.DATE }}
+          name: Xiaomi AX3000 (RA80v2) NSS ${{ env.DATE }}
           body_path: release-notes.md
           make_latest: true
           files: |
             ${{ env.FIRMWARE }}/*-sysupgrade.bin
-            ${{ env.FIRMWARE }}/*-factory.ubi
-            ${{ env.FIRMWARE }}/*-uboot-recovery*.fit
             ${{ env.FIRMWARE }}/*-initramfs-uImage.itb
             ${{ env.FIRMWARE }}/*.manifest
             ${{ env.FIRMWARE }}/sha256sums

@@ -8,7 +8,7 @@ offsets 168/176 reads far past the allocation and then calls whatever is
 there as a function pointer, holding bus->mdio_lock.  MDIO wedges, the
 watchdog procd armed before preinit fires, and the board reboot-loops.
 
-On cmcc,pz-l8 (IPQ5018 + external QCA8337 on mdio1) that meant a ~73 s
+On IPQ5018 boards with an external QCA8337 on mdio1 that meant a ~73 s
 reboot loop with no link on any port.  Device 0, the internal ESS, is
 unaffected because it uses switch_access_mode = "local bus".  This is
 also why upstream ships ISISC_ENABLE=disable - with the mainline MDIO

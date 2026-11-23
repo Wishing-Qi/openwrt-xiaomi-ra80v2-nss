@@ -1,0 +1,16 @@
+From: ra80v2-nss project
+Subject: [PATCH] net: phy: add Motorcomm YT9215 Option B initializer for Xiaomi AX3000 v2
+
+Build yt9215-ra80v2 into the kernel so the YT9215 switch on mdio@90000 is
+initialized in untagged dual-conduit mode at boot before netifd brings up
+eth0 (dp2 / br-lan) and eth1 (dp1 / wan).
+
+Signed-off-by: ra80v2-nss
+---
+--- a/drivers/net/phy/Makefile
++++ b/drivers/net/phy/Makefile
+@@ -100,3 +100,4 @@ obj-$(CONFIG_STE10XP)		+= ste10xp.o
+ obj-$(CONFIG_TERANETICS_PHY)	+= teranetics.o
+ obj-$(CONFIG_VITESSE_PHY)	+= vitesse.o
+ obj-$(CONFIG_XILINX_GMII2RGMII) += xilinx_gmii2rgmii.o
++obj-y				+= yt9215-ra80v2.o

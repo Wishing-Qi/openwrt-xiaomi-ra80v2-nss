@@ -1,4 +1,4 @@
-From: pzl8-nss project
+From: ra80v2-nss project
 Subject: [PATCH] nss_core: make file-local helpers static
 
 nss_core_handle_nss_status_pkt() and nss_skb_reuse() are only referenced
@@ -7,7 +7,7 @@ linkage and no prototype. OpenWrt builds the kernel with
 -Wmissing-prototypes (scripts/Makefile.extrawarn) escalated to an error,
 so this breaks the build on 6.12. Give both functions internal linkage.
 
-Signed-off-by: pzl8-nss
+Signed-off-by: ra80v2-nss
 ---
 --- a/nss_core.c
 +++ b/nss_core.c

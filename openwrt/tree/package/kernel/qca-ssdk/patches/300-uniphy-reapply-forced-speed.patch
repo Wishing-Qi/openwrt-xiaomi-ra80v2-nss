@@ -4,16 +4,13 @@ adpt_mp_uniphy_mode_configure() sets ch0_force_speed in
 UNIPHY_CHANNEL0_INPUT_OUTPUT_4 via adpt_mp_uniphy_mode_ctrl_set(), and
 then calls adpt_mp_gcc_uniphy_port_reset() which power-cycles the uniphy
 port.  That returns the register to its 0x844 reset default, clearing the
-bit that was just set - confirmed by reading it back on cmcc,pz-l8, where
+bit that was just set - confirmed by reading it back on IPQ5018, where
 it holds exactly 0x844 with ch0_force_speed = 0 after a full init.
 
-It only matters when the SGMII peer is forced too.  Here the peer is a
-QCA8337 whose port 6 qca,ar8327-initvals forces to 1000/full, so it sends
+It only matters when the SGMII peer is forced too.  Here the peer is an
+external switch whose SGMII port is forced to 1000/full, so it sends
 no SGMII auto-negotiation code words while the uniphy waits for one:
-both ends report a link up and no frame ever crosses the segment.  The
-switch-side registers all read back exactly as programmed, and the
-port 6 MAC counters increment on transmit, so the break is purely the
-SerDes never completing.
+both ends report a link up and no frame ever crosses the segment.
 
 Re-apply the setting once the port reset, calibration and clock enable
 are all done.
@@ -33,8 +30,8 @@ are all done.
 +	 * register to its 0x844 reset default and clears the bit again.
 +	 *
 +	 * When the SGMII peer is itself forced, nothing then brings the link up:
-+	 * on cmcc,pz-l8 the peer is a QCA8337 whose port 6 is forced to
-+	 * 1000/full by qca,ar8327-initvals, so it never sends SGMII
++	 * on xiaomi,ax3000-v2 the peer is a YT9215 whose port 8 is forced to
++	 * 1000/full, so it never sends SGMII
 +	 * auto-negotiation code words, while the uniphy is left waiting for an
 +	 * auto-negotiation that never arrives.  Both ends report a link and not
 +	 * one frame is exchanged.

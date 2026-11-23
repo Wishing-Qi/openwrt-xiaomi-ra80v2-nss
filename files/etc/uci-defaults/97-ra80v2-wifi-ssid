@@ -1,0 +1,29 @@
+#!/bin/sh
+# Append the board's own MAC suffix to the shipped SSIDs on Xiaomi AX3000 (RA80v2).
+
+mac=
+for f in /sys/class/net/eth0/address /sys/class/net/eth1/address; do
+	[ -r "$f" ] || continue
+	mac=$(cat "$f")
+	[ -n "$mac" ] && break
+done
+
+[ -n "$mac" ] || exit 1
+
+sfx=$(echo "$mac" | tr 'a-z' 'A-Z' | awk -F: '{print $5 $6}')
+[ -n "$sfx" ] || exit 1
+
+changed=0
+for r in 0 1; do
+	cur=$(uci -q get wireless.default_radio${r}.ssid) || continue
+	case "$cur" in
+		Xiaomi-AX3000-2.4G|Xiaomi-AX3000-5G) ;;
+		*) continue ;;
+	esac
+	uci set wireless.default_radio${r}.ssid="${cur}-${sfx}"
+	changed=1
+done
+
+[ "$changed" = 1 ] && uci commit wireless
+
+exit 0

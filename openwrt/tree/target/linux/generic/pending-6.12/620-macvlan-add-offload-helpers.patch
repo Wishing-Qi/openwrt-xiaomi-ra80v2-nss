@@ -1,4 +1,4 @@
-From: CMCC PZ-L8 NSS project
+From: Xiaomi AX3000 (RA80v2) NSS project
 Subject: [PATCH] macvlan: add the offload helpers QSDK's ECM expects
 
 qca-nss-ecm's macvlan support calls macvlan_get_mode() and

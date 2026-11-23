@@ -1,0 +1,13 @@
+From: ra80v2-nss project
+Subject: [PATCH] arm64: dts: qcom: add ipq5018-xiaomi-ax3000-v2.dtb to Makefile
+
+Register ipq5018-xiaomi-ax3000-v2.dtb in arch/arm64/boot/dts/qcom/Makefile.
+
+Signed-off-by: ra80v2-nss
+---
+--- a/arch/arm64/boot/dts/qcom/Makefile
++++ b/arch/arm64/boot/dts/qcom/Makefile
+@@ -20,6 +20,7 @@ dtb-$(CONFIG_ARCH_QCOM)	+= ipq5018-rdp432-c2.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= ipq5018-tplink-archer-ax55-v1.dtb
++dtb-$(CONFIG_ARCH_QCOM)	+= ipq5018-xiaomi-ax3000-v2.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= ipq5332-rdp441.dtb

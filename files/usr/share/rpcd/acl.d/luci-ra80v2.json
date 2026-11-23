@@ -1,0 +1,10 @@
+{
+	"luci-ra80v2-hardware": {
+		"description": "Grant access to the Xiaomi AX3000 (RA80v2) hardware readouts",
+		"read": {
+			"ubus": {
+				"luci.ra80v2": [ "status" ]
+			}
+		}
+	}
+}

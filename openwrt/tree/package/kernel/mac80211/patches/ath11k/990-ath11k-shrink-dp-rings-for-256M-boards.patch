@@ -2,8 +2,8 @@ ath11k: shrink the data-path rings to fit a 256 MB board
 
 ath11k sizes its DP rings and buffer pools from compile-time constants in
 dp.h that are identical for every chip and tuned for IPQ8074/IPQ6018 class
-APs with 512 MB - 1 GB of RAM.  On the 256 MB IPQ5018 in cmcc,pz-l8 that
-costs about 79 MB, measured: MemAvailable drops from 87 MB to 7.7 MB the
+APs with 512 MB - 1 GB of RAM.  On the 256 MB IPQ5018 in xiaomi,ax3000-v2
+that costs about 79 MB, measured: MemAvailable drops from 87 MB to 7.7 MB the
 moment both radios finish QMI init, leaving nothing for the rest of the
 system and the board reboots under load.
 

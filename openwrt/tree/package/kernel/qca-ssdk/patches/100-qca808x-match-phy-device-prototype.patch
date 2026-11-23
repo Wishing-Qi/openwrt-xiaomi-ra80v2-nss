@@ -1,6 +1,6 @@
 qca-ssdk: match the kernel's .match_phy_device prototype
 
-cmcc,pz-l8 needs IN_MP_PHY=TRUE for the IPQ5018 internal GE PHY, and
+xiaomi,ax3000-v2 needs IN_MP_PHY=TRUE for the IPQ5018 internal GE PHY, and
 src/hsl/phy/mpge_phy.c / mpge_led.c call qca808x_phy_set_wol_status(),
 qca808x_phy_get_eee_cap() and qca808x_phy_led_ctrl_source_set() directly.
 IN_MP_PHY therefore implies IN_QCA808X_PHY (ssdk's own config sets both for

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Default the web interface to Chinese for Xiaomi AX3000 (RA80v2).
+
+[ "$(uci -q get luci.main.lang)" = "auto" ] || exit 0
+
+uci set luci.main.lang='zh_cn'
+uci commit luci
+
+exit 0

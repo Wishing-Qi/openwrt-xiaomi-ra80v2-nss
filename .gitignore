@@ -2,3 +2,5 @@
 *.orig
 *.rej
 *.bak
+AGENTS.md
+README.tmp

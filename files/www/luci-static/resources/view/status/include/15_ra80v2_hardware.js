@@ -2,24 +2,14 @@
 'require baseclass';
 'require rpc';
 
-/* The stock status page shows none of this. The data has always been there -
- * cpufreq and the thermal zones are standard sysfs, ath11k registers a hwmon
- * per radio, and the NSS core reports its own utilisation through debugfs.
- * What was missing was somewhere to put it.
- *
- * One ubus call per poll rather than a file read per field; the plugin lives at
- * /usr/libexec/rpcd/luci.pzl8 and does nothing but read and reformat.
+/* Hardware status view for Xiaomi AX3000 (RA80v2) with Qualcomm NSS offload.
+ * The rpcd plugin lives at /usr/libexec/rpcd/luci.ra80v2.
  */
 var callHardware = rpc.declare({
-	object: 'luci.pzl8',
+	object: 'luci.ra80v2',
 	method: 'status'
 });
 
-/* The hwmon index follows the phy order, and phy numbering is not stable - a
- * `wifi reload` swaps phy0 and phy1 on this board. The device-tree node does
- * not move, so the label is keyed on that, falling back to the phy name on any
- * board this map does not know.
- */
 var RADIO_NODE = {
 	'c000000.wifi': '2.4 GHz',
 	'b00a040.wifi': '5 GHz'
@@ -30,9 +20,6 @@ function celsius(mdeg) {
 	return isNaN(v) ? '-' : (v / 1000).toFixed(1) + ' °C';
 }
 
-/* Bytes per interval to bits per second. A negative delta means the counter
- * was reset - an interface going down - so the rate is unknown, not negative.
- */
 function rate(deltaBytes, deltaMs) {
 	if (deltaBytes == null || deltaBytes < 0 || !(deltaMs > 0))
 		return null;
@@ -68,9 +55,6 @@ function parseStat(line) {
 	return f.length >= 7 ? f : null;
 }
 
-/* user nice system idle iowait irq softirq - busy over the whole window, which
- * is what the idle field's complement means on a multi-core box.
- */
 function busyPercent(prev, cur) {
 	if (!prev || !cur)
 		return null;
@@ -120,8 +104,6 @@ return baseclass.extend({
 
 		var rows = [ _('Processor'), desc ];
 
-		/* Needs two samples, so the first poll after loading the page has
-		 * nothing to divide yet. */
 		rows.push(_('CPU load'),
 			load != null ? load + ' %' : _('Collecting data...'));
 
@@ -136,12 +118,6 @@ return baseclass.extend({
 				celsius(radio.temp));
 		});
 
-		/* Both numbers in one cell rather than a sentence. A bare "peak" as a
-		 * msgid would translate that word everywhere else in LuCI too, which
-		 * is not this file's business.
-		 *
-		 * NSS, not NSS/PPE: the packet processing engine is an IPQ807x /
-		 * IPQ60xx / IPQ95xx block. IPQ5018 does not have one. */
 		if (data.nss)
 			rows.push(_('NSS utilisation (average / peak)'),
 				data.nss.avg + ' % / ' + data.nss.max + ' %');
@@ -149,8 +125,6 @@ return baseclass.extend({
 		if (data.ecm != null)
 			rows.push(_('Accelerated connections'), String(data.ecm));
 
-		/* Throughput needs two samples and the wall time between them. The
-		 * poll interval is not fixed, so it is measured rather than assumed. */
 		var now = Date.now(),
 		    prevNet = this.prevNet,
 		    nowNet = {};
@@ -167,9 +141,6 @@ return baseclass.extend({
 			    rx = was ? rate(iface.rx - was.rx, ms) : null,
 			    tx = was ? rate(iface.tx - was.tx, ms) : null;
 
-			/* Labelled by whatever netifd calls the port, with the device name as
-			 * the fallback. Nothing here assumes a box has a wan, or a lan, or
-			 * exactly two ports. */
 			var tag = iface.iface ? iface.iface + ' / ' + iface.dev : iface.dev;
 
 			rows.push(_('Port throughput') + ' (' + tag + ')',
