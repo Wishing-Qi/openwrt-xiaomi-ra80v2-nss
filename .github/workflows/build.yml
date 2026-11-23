@@ -111,6 +111,11 @@ jobs:
           cp -a vantage/luci-app-vantage openwrt/feeds/luci/applications/
           cp -a vantage/luci-app-vantage-traffic openwrt/feeds/luci/applications/
 
+          mkdir -p openwrt/files/etc/apk/keys
+          wget -qO openwrt/files/etc/apk/keys/vantage-signing.pem \
+              https://anothadev.github.io/luci-theme-vantage/vantage-signing.pem
+          echo "c8a6c83eeb49ca2407932fb5e95785776128cef87db75ebaea0fe4171eee2157  openwrt/files/etc/apk/keys/vantage-signing.pem" | sha256sum -c -
+
           git clone --depth 1 --filter=blob:none --sparse "$IMM_LUCI_REPO" imm-luci
           git -C imm-luci sparse-checkout set \
               applications/luci-app-autoreboot \
