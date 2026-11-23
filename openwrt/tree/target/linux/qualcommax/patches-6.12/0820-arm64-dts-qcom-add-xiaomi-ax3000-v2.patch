@@ -7,7 +7,7 @@ Signed-off-by: ra80v2-nss
 ---
 --- a/arch/arm64/boot/dts/qcom/Makefile
 +++ b/arch/arm64/boot/dts/qcom/Makefile
-@@ -20,6 +20,7 @@ dtb-$(CONFIG_ARCH_QCOM)	+= ipq5018-rdp432-c2.dtb
+@@ -20,2 +20,3 @@ dtb-$(CONFIG_ARCH_QCOM)	+= ipq5018-rdp432-c2.dtb
  dtb-$(CONFIG_ARCH_QCOM)	+= ipq5018-tplink-archer-ax55-v1.dtb
 +dtb-$(CONFIG_ARCH_QCOM)	+= ipq5018-xiaomi-ax3000-v2.dtb
  dtb-$(CONFIG_ARCH_QCOM)	+= ipq5332-rdp441.dtb

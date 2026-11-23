@@ -93,21 +93,33 @@ jobs:
           [ "$(git ls-remote "$FULLCONE_REPO" HEAD | cut -f1)" = "$FULLCONE_SHA" ] ||
               { echo "::error::fullcone master moved during this step, re-run it"; exit 1; }
 
-      - name: Add the Argon theme
+      - name: Add the Vantage theme and dashboard
         env:
-          ARGON_REPO: https://github.com/jerrykuku/luci-theme-argon.git
+          VANTAGE_REPO: https://github.com/anothaDev/luci-theme-vantage.git
         run: |
           set -eu
-          git clone --depth 1 "$ARGON_REPO" openwrt/package/luci-theme-argon
+          git clone --depth 1 "$VANTAGE_REPO" vantage
 
-          ARGON_COMMIT=$(git -C openwrt/package/luci-theme-argon \
-                             rev-parse --short HEAD)
-          git -C openwrt/package/luci-theme-argon --no-pager log -1 \
-              --format='argon %h  %ci  %s'
-          echo "ARGON_COMMIT=$ARGON_COMMIT" >> "$GITHUB_ENV"
+          VANTAGE_COMMIT=$(git -C vantage rev-parse --short HEAD)
+          git -C vantage --no-pager log -1 \
+              --format='vantage %h  %ci  %s'
+          echo "VANTAGE_COMMIT=$VANTAGE_COMMIT" >> "$GITHUB_ENV"
+
+          cp -a vantage/luci-theme-vantage openwrt/feeds/luci/themes/
+          cp -a vantage/luci-app-vantage openwrt/feeds/luci/applications/
+          cp -a vantage/luci-app-vantage-traffic openwrt/feeds/luci/applications/
 
           cd openwrt
-          echo 'CONFIG_PACKAGE_luci-theme-argon=y' >> .config
+          ./scripts/feeds update -i luci
+          ./scripts/feeds install -a -p luci
+          cat >> .config << 'EOF'
+          CONFIG_PACKAGE_luci-theme-vantage=y
+          CONFIG_PACKAGE_luci-app-vantage=y
+          CONFIG_PACKAGE_luci-app-vantage-traffic=y
+          CONFIG_PACKAGE_luci-i18n-vantage-theme-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-vantage-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-vantage-traffic-zh-cn=y
+          EOF
           make defconfig
 
       - name: Verify the expected packages are selected
@@ -129,7 +141,9 @@ jobs:
             CONFIG_PACKAGE_kmod-mtd-rw \
             CONFIG_LUCI_LANG_zh_Hans \
             CONFIG_PACKAGE_luci-i18n-base-zh-cn \
-            CONFIG_PACKAGE_luci-theme-argon
+            CONFIG_PACKAGE_luci-theme-vantage \
+            CONFIG_PACKAGE_luci-app-vantage \
+            CONFIG_PACKAGE_luci-app-vantage-traffic
           do
             if grep -q "^${sym}=y" .config; then
               echo "  ok   $sym"
@@ -162,7 +176,7 @@ jobs:
             echo "openwrt_ref=$OPENWRT_REF"
             echo "openwrt_commit=$(git rev-parse --short HEAD)"
             echo "project_commit=$(git -C "$GITHUB_WORKSPACE/ra80v2-nss" rev-parse --short HEAD)"
-            echo "argon_commit=${ARGON_COMMIT:-none}"
+            echo "vantage_commit=${VANTAGE_COMMIT:-none}"
             echo "fullcone_commit=${FULLCONE_COMMIT:-none}"
             echo "date=$(date -u '+%Y-%m-%d %H:%M UTC')"
           } | tee "$GITHUB_WORKSPACE/build-info.txt"

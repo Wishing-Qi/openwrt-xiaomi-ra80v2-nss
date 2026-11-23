@@ -151,6 +151,7 @@ say "Copying files that do not exist upstream"
       install -Dm644 "$f" "$OW/${f#./}"
       echo "  ${f#./}"
   done )
+rm -f "$OW/target/linux/qualcommax/patches-6.12/0820-arm64-dts-qcom-add-xiaomi-ax3000-v2.patch"
 
 # ---------------------------------------------------------------- 4. feed
 say "Registering the custom NSS package feed"

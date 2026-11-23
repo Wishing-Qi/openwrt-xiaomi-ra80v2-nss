@@ -1,5 +1,16 @@
-# Patches and shell scripts must keep LF: CRLF breaks "git apply" and
-# makes the kernel build choke on the shebang line.
 * text=auto eol=lf
-*.patch -text
-*.bin -text
+*.patch text eol=lf
+*.sh text eol=lf
+*.dts text eol=lf
+*.dtsi text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.mk text eol=lf
+Makefile text eol=lf
+*.config text eol=lf
+*.po text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.zb64 text eol=lf
+*.lmo binary
+*.bin binary
