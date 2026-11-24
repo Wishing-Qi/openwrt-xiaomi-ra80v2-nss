@@ -348,7 +348,6 @@
 	switch@1d {
 		compatible = "motorcomm,yt9215-ra80v2";
 		reg = <0x1d>;
-		reset-gpios = <&tlmm 39 GPIO_ACTIVE_LOW>;
 	};
 };
 

@@ -164,20 +164,13 @@ static int yt9215_int_phy_write(struct mdio_device *mdiodev, int phy, int reg, u
 
 static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 {
-	struct gpio_desc *reset_gpio;
 	u32 chip_id = 0, r;
 	int p, q, ret;
 
-	/* Optional GPIO 39 hardware reset if not already pulsed by mdio@90000 */
-	reset_gpio = devm_gpiod_get_optional(&mdiodev->dev, "reset", GPIOD_OUT_LOW);
-	if (!IS_ERR_OR_NULL(reset_gpio)) {
-		gpiod_set_value_cansleep(reset_gpio, 1);
-		usleep_range(10000, 15000);
-		gpiod_set_value_cansleep(reset_gpio, 0);
-		msleep(50);
-	} else {
-		msleep(50);
-	}
+	/* GPIO 39 hardware reset is pulsed by the parent mdio@90000 bus
+	 * before child MDIO devices are registered and probed.
+	 */
+	msleep(50);
 
 	ret = yt9215_smi_read(mdiodev, YT921X_CHIP_ID_REG, &chip_id);
 	if (ret || (chip_id >> 16) != 0x9002) {
@@ -273,6 +266,27 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 			yt9215_smi_update_bits(mdiodev, (0x40080 + (idx | 0x20)) * 4, 0xf, p | 1);
 		}
 	}
+
+	/* Egress packet buffer & AC queue quota setup (yt921x_chip_setup 0x10390..0x10474) */
+	yt9215_smi_write(mdiodev, 0x2801d0, 0xc8);
+	for (p = 0; p < 11; p++) {
+		if (p > 4 && p != 8 && p != 9)
+			continue;
+		if (p != 4) {
+			yt9215_smi_write(mdiodev, 0x281000 + p * 8, 0x80402850U);
+			yt9215_smi_write(mdiodev, 0x281004 + p * 8, 0x26f1bU);
+		}
+		for (q = 0; q < 8; q++)
+			yt9215_smi_write(mdiodev, 0x301000 + (p * 8 + q) * 4, 0x40020U);
+		for (q = 0; q < 4; q++)
+			yt9215_smi_write(mdiodev, 0x301200 + (p * 4 + q) * 4, 0x40020U);
+	}
+	yt9215_smi_write(mdiodev, 0x281020, 0x1);
+	yt9215_smi_write(mdiodev, 0x281024, 0x26765U);
+	for (p = 0; p <= 3; p++)
+		yt9215_smi_write(mdiodev, 0x303000 + p * 4, 0x78);
+	yt9215_smi_write(mdiodev, 0x303020, 0x78);
+
 	for (p = 0; p <= 4; p++)
 		yt9215_smi_update_bits(mdiodev, 0x100000 + p * 4, 0x1c3, 0x1c1);
 	yt9215_smi_update_bits(mdiodev, 0x100000 + 8 * 4, 0x1c3, 0x1c1);
@@ -296,23 +310,20 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 				       0x3 << (p * 2), 0x3 << (p * 2));
 	}
 
-	/* 4. Option B Hardware Port Isolation Matrix (0x180294 + port * 4),
-	 *    bit=1 = forwarding to that destination port is allowed:
-	 *    - WAN group: Port 3 -> {4}, Port 4 -> {3}
-	 *    - LAN group: Port 0 -> {1,2,8}, Port 1 -> {0,2,8},
-	 *                 Port 2 -> {0,1,8}, Port 8 -> {0,1,2}
+	/* 4. Option B Hardware Port Isolation Matrix (0x180294 + port * 4):
+	 *    In yt921x_userport_standalone (0xc504) and yt921x_userport_cpu_isolation_set
+	 *    (0xc04c), bit=1 ISOLATES (blocks) a destination port and bit=0 ALLOWS
+	 *    forwarding:
+	 *    - LAN group {0, 1, 2, 8}: clear bits {0, 1, 2, 8}, set all other bits to 1
+	 *    - WAN group {3, 4}:       clear bits {3, 4},       set all other bits to 1
 	 */
-	/* NOTE: verified against the working 102 driver
-	 * (yt921x_port_isolation_set): bit=1 means forwarding to that
-	 * destination port is ALLOWED.  Write the allowed masks directly.
-	 */
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(0), 0x7ff, 0x106);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(1), 0x7ff, 0x105);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(2), 0x7ff, 0x103);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(8), 0x7ff, 0x007);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(0), 0x7ff, 0x7ff & ~0x106);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(1), 0x7ff, 0x7ff & ~0x105);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(2), 0x7ff, 0x7ff & ~0x103);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(8), 0x7ff, 0x7ff & ~0x007);
 
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(3), 0x7ff, 0x010);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(4), 0x7ff, 0x008);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(3), 0x7ff, 0x7ff & ~0x010);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(4), 0x7ff, 0x7ff & ~0x008);
 
 	/* 5. Configure Port 8 (SGMII primary conduit -> dp2 / eth0):
 	 *    - Enable interface (0x80028 |= BIT(0)) and ungate SerDes (0x80394 &= ~BIT(1))
