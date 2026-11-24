@@ -12,6 +12,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/gpio/consumer.h>
 #include <linux/kernel.h>
 #include <linux/mdio.h>
 #include <linux/module.h>
@@ -25,30 +26,41 @@
 #define YT9215_REG_DATA_READ		((YT9215_SWITCH_ID << 2) | 0x3)
 
 /* YT9215 Global & Switch Registers */
+#define YT921X_GLOBAL_RESET		0x80000
 #define YT921X_GLOBAL_CTRL1		0x80004
 #define YT921X_CHIP_ID_REG		0x80008
 #define YT921X_EXT_CPU_PORT_REG		0x8000c
+#define YT921X_CPU_TAG_TPID_REG		0x80010
 #define YT921X_INTERFACE_CTRL		0x80028
-#define YT921X_SERDES_CTRL		0x80394
-#define YT921X_PORT_CTRL(p)		(0x80100 + (p) * 4)
 #define YT921X_SGMII_MODE(p)		(0x8006c + (p) * 4)
+#define YT921X_MAC_EN(p)		(0x80078 + (p) * 8)
+#define YT921X_PORT_CTRL(p)		(0x80100 + (p) * 4)
+#define YT921X_LOOP_DETECT		0x80230
 #define YT921X_SGMII_LINK(p)		(0x802d4 + (p) * 4)
 #define YT921X_XMII_CTRL(p)		(0x8036c + (p) * 4)
-#define YT921X_MAC_EN(p)		(0x80078 + (p) * 8)
+#define YT921X_SERDES_CTRL		0x80394
 
 /* Internal PHY MBUS indirect controller */
 #define YT921X_INT_MBUS_OP		0xf0000
 #define YT921X_INT_MBUS_ADDR		0xf0004
 #define YT921X_INT_MBUS_DOUT		0xf0008
+#define YT921X_INT_MBUS_DIN		0xf000c
 
-/* L2 & Port Isolation Registers */
+/* L2, STP, VLAN & Port Isolation Registers */
 #define YT921X_PORT_LEARN_CTRL(p)	(0x180200 + (p) * 4)
+#define YT921X_CTRLPKT_EEE_ACT		0x18028c
+#define YT921X_CTRLPKT_LLDP_ACT		0x180290
 #define YT921X_PORT_ISOLATION(p)	(0x180294 + (p) * 4)
+#define YT921X_STP_STATE_REG		0x18038c
+#define YT921X_PORT_LEARN_DIS(p)	(0x1803d0 + (p) * 4)
 #define YT921X_PORT_EGR_MASK1		0x180468
 #define YT921X_PORT_EGR_MASK2		0x18046c
 #define YT921X_FLOOD_CTRL_BASE		0x180480
 #define YT921X_FLOOD_CTRL_END		0x1804ac
 #define YT921X_L2_ENABLE_REG		0x180690
+#define YT921X_VLAN1_LOW		0x188008
+#define YT921X_VLAN1_HIGH		0x18800c
+#define YT921X_PORT_VLAN_CTRL(p)	(0x230010 + (p) * 4)
 
 static int yt9215_smi_read(struct mdio_device *mdiodev, u32 reg, u32 *val)
 {
@@ -123,39 +135,49 @@ static int yt9215_smi_update_bits(struct mdio_device *mdiodev, u32 reg,
 	return yt9215_smi_write(mdiodev, reg, val);
 }
 
-static int yt9215_int_phy_write(struct mdio_device *mdiodev, int phy, int reg, u16 val)
+static int yt9215_smi_wait(struct mdio_device *mdiodev, u32 reg, u32 mask, u32 expect)
 {
-	u32 ctrl, status = 1;
+	u32 val = 0;
 	int i;
 
-	for (i = 0; i < 50; i++) {
-		if (yt9215_smi_read(mdiodev, YT921X_INT_MBUS_OP, &status) == 0 &&
-		    !(status & 1))
-			break;
-		udelay(100);
+	for (i = 0; i < 100; i++) {
+		if (yt9215_smi_read(mdiodev, reg, &val) == 0 &&
+		    (val & mask) == expect)
+			return 0;
+		usleep_range(1000, 2000);
 	}
+	return -ETIMEDOUT;
+}
 
+static int yt9215_int_phy_write(struct mdio_device *mdiodev, int phy, int reg, u16 val)
+{
+	u32 ctrl;
+
+	yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
 	ctrl = ((phy & 0x1f) << 21) | ((reg & 0x1f) << 16) | 0x4;
 	yt9215_smi_update_bits(mdiodev, YT921X_INT_MBUS_ADDR, 0x03fff00c, ctrl);
 	yt9215_smi_write(mdiodev, YT921X_INT_MBUS_DOUT, val);
 	yt9215_smi_write(mdiodev, YT921X_INT_MBUS_OP, 1);
-
-	for (i = 0; i < 50; i++) {
-		if (yt9215_smi_read(mdiodev, YT921X_INT_MBUS_OP, &status) == 0 &&
-		    !(status & 1))
-			break;
-		udelay(100);
-	}
+	yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
 	return 0;
 }
 
 static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 {
+	struct gpio_desc *reset_gpio;
 	u32 chip_id = 0, r;
-	int p, ret;
+	int p, q, ret;
 
-	/* Allow switch post-reset stabilization */
-	msleep(50);
+	/* Optional GPIO 39 hardware reset if not already pulsed by mdio@90000 */
+	reset_gpio = devm_gpiod_get_optional(&mdiodev->dev, "reset", GPIOD_OUT_LOW);
+	if (!IS_ERR_OR_NULL(reset_gpio)) {
+		gpiod_set_value_cansleep(reset_gpio, 1);
+		usleep_range(10000, 15000);
+		gpiod_set_value_cansleep(reset_gpio, 0);
+		msleep(50);
+	} else {
+		msleep(50);
+	}
 
 	ret = yt9215_smi_read(mdiodev, YT921X_CHIP_ID_REG, &chip_id);
 	if (ret || (chip_id >> 16) != 0x9002) {
@@ -164,75 +186,164 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 		return -ENODEV;
 	}
 
-	/* 1. Enable switch global MAC/ACL/MIB engines (0x80004 |= 0x16) */
+	/* 1. Exact yt921x_chip_reset sequence from working 102 driver */
+	yt9215_smi_wait(mdiodev, 0xe0004, 0xf, 0x3);
+	yt9215_smi_write(mdiodev, 0xe0000, 0xfb05);
+	yt9215_smi_wait(mdiodev, 0xe0004, 0xf, 0x3);
+	yt9215_smi_write(mdiodev, YT921X_GLOBAL_RESET, 0x80000000U);
+	usleep_range(10000, 20000);
+	yt9215_smi_wait(mdiodev, YT921X_GLOBAL_RESET, 0xffffffffU, 0x0);
+
+	/* 2. Exact yt921x_chip_setup sequence */
 	yt9215_smi_update_bits(mdiodev, YT921X_GLOBAL_CTRL1, 0x16, 0x16);
 
-	/* 2. Disable proprietary 0x9988 CPU tag on EXT_CPU_PORT (0x8000c = 0x0)
-	 *    so all frames on Port 4 (dp1) and Port 8 (dp2) are plain Ethernet.
+	/* Disable proprietary 0x9988 CPU tag (0x8000c = 0x0) so all frames on
+	 * Port 4 (dp1/eth1) and Port 8 (dp2/eth0) are standard untagged Ethernet.
 	 */
 	yt9215_smi_write(mdiodev, YT921X_EXT_CPU_PORT_REG, 0x0);
 
-	/* 3. Enable L2 forwarding engine (0x180690 = 1) */
+	/* Enable L2 engine and disable hardware loop-detect */
 	yt9215_smi_write(mdiodev, YT921X_L2_ENABLE_REG, 0x1);
+	yt9215_smi_read(mdiodev, YT921X_LOOP_DETECT, &r);
+	r = (r & ~0x0003fffdU) | 0x40000U;
+	yt9215_smi_write(mdiodev, YT921X_LOOP_DETECT, r);
 
-	/* 4. Open egress masks & flood control across active ports (0..4, 8 -> 0x11f) */
+	/* RMA slow-action = 2 (forward standard slow protocols, STP/LACP) */
+	yt9215_smi_update_bits(mdiodev, 0x1805d0, 0x3f0, 0x1bf);
+	yt9215_smi_update_bits(mdiodev, 0x1805d8, 0x3f0, 0x2bf);
+	yt9215_smi_update_bits(mdiodev, 0x1805dc, 0x3f0, 0x1bf);
+	yt9215_smi_update_bits(mdiodev, 0x180608, 0x3f0, 0x1bf);
+
+	/* Forward LLDP and EEE control packets (0x400) */
+	yt9215_smi_write(mdiodev, YT921X_CTRLPKT_EEE_ACT, 0x400);
+	yt9215_smi_write(mdiodev, YT921X_CTRLPKT_LLDP_ACT, 0x400);
+
+	/* Egress masks and flood control across active ports (0..4, 8 -> 0x11f) */
 	yt9215_smi_update_bits(mdiodev, YT921X_PORT_EGR_MASK1, 0x7ff, 0x11f);
 	yt9215_smi_update_bits(mdiodev, YT921X_PORT_EGR_MASK2, 0x7ff0, 0x11f << 4);
 	for (r = YT921X_FLOOD_CTRL_BASE; r < YT921X_FLOOD_CTRL_END; r += 4)
 		yt9215_smi_update_bits(mdiodev, r, 0xff, 0xff);
 
+	yt9215_smi_update_bits(mdiodev, 0x18047c, 0xdf0, 0xca0);
+	yt9215_smi_update_bits(mdiodev, 0x180280, 0x3ff800, 0x3ff800);
+	yt9215_smi_write(mdiodev, 0x180508, 0x51f);
+	yt9215_smi_write(mdiodev, 0x18050c, 0x51f);
+	yt9215_smi_write(mdiodev, 0x180510, 0x51f);
+	yt9215_smi_write(mdiodev, 0x180514, 0x400);
+	yt9215_smi_write(mdiodev, 0x180734, 0x0);
+	yt9215_smi_write(mdiodev, 0x180738, 0x400000);
+	yt9215_smi_write(mdiodev, 0x180448, 0x7ff);
+	yt9215_smi_write(mdiodev, 0x300300, 0x0);
+	yt9215_smi_write(mdiodev, 0x300304, 0x0);
+
+	/* Default VLAN 1 membership: all 11 ports (0x7ff) untagged */
+	yt9215_smi_write(mdiodev, YT921X_VLAN1_LOW, 0x0043ff80U);
+	yt9215_smi_write(mdiodev, YT921X_VLAN1_HIGH, 0x0);
+
+	/* Buffer / QoS / scheduler initialization from yt921x_chip_setup */
+	yt9215_smi_write(mdiodev, 0x220104, 0x50);
+	yt9215_smi_write(mdiodev, 0x220100, 0x50);
+	yt9215_smi_write(mdiodev, 0x34000c, 0x50);
+	yt9215_smi_write(mdiodev, 0x340008, 0x84);
+	yt9215_smi_update_bits(mdiodev, 0x220140, 0x7ff, 0x0);
+	for (r = 0x220200; r < 0x220284; r += 4)
+		yt9215_smi_update_bits(mdiodev, r, 0x1, 0x0);
+	yt9215_smi_write(mdiodev, 0x220bf0, 0x0);
+	yt9215_smi_write(mdiodev, 0x220bf4, 0x0);
+	yt9215_smi_write(mdiodev, 0x220bf8, 0x4000);
+	yt9215_smi_write(mdiodev, 0x1806a0, 0x7ff);
+	yt9215_smi_write(mdiodev, 0x202000, 0x7ff);
+	for (p = 0; p < 64; p++)
+		yt9215_smi_write(mdiodev, 0x180000 + p * 4, (p >> 3) << 2);
+	for (p = 0; p < 8; p++) {
+		u32 base = 0x180100 + p * 4;
+		u32 val = base - 0x180100;
+
+		yt9215_smi_write(mdiodev, base, val);
+		yt9215_smi_write(mdiodev, base + 0x40, val);
+		yt9215_smi_write(mdiodev, base + 0x20, val | 1);
+		yt9215_smi_write(mdiodev, base + 0x60, val | 1);
+	}
+	for (p = 0; p < 16; p += 2) {
+		for (q = 0; q < 4; q++) {
+			u32 idx = ((p & 0x7f) << 1) | q;
+
+			yt9215_smi_update_bits(mdiodev, (0x40040 + idx) * 4, 0x3f, p << 2);
+			yt9215_smi_update_bits(mdiodev, (0x40040 + idx) * 4 + 0x100, 0xf, p | 1);
+			yt9215_smi_update_bits(mdiodev, (0x40080 + (idx | 0x20)) * 4, 0xf, p | 1);
+		}
+	}
+	for (p = 0; p <= 4; p++)
+		yt9215_smi_update_bits(mdiodev, 0x100000 + p * 4, 0x1c3, 0x1c1);
+	yt9215_smi_update_bits(mdiodev, 0x100000 + 8 * 4, 0x1c3, 0x1c1);
+	yt9215_smi_write(mdiodev, 0xc0004, 0x40000001U);
+	yt9215_smi_update_bits(mdiodev, 0x8036c, 0x40000, 0x40000);
+	yt9215_smi_update_bits(mdiodev, 0x180958, 0x1, 0x1);
+
+	/* 3. Per-port setup (yt921x_dsa_port_setup + STP FORWARDING):
+	 *    - 0x180200 + p*4 = 0x3b5ed1
+	 *    - 0x1803d0 + p*4 &= ~0x20000 (enable hardware MAC learning!)
+	 *    - 0x230010 + p*4 = 0x00000040 (default PVID = 1)
+	 *    - 0x18038c: set STP state = 3 (FORWARDING) for all active ports 0..4, 8
+	 */
+	for (p = 0; p < 11; p++) {
+		if (p > 4 && p != 8)
+			continue;
+		yt9215_smi_write(mdiodev, YT921X_PORT_LEARN_CTRL(p), 0x3b5ed1);
+		yt9215_smi_update_bits(mdiodev, YT921X_PORT_LEARN_DIS(p), 0x20000, 0x0);
+		yt9215_smi_update_bits(mdiodev, YT921X_PORT_VLAN_CTRL(p), 0x3ffc0, 1 << 6);
+		yt9215_smi_update_bits(mdiodev, YT921X_STP_STATE_REG,
+				       0x3 << (p * 2), 0x3 << (p * 2));
+	}
+
+	/* 4. Option B Hardware Port Isolation Matrix (0x180294 + port * 4),
+	 *    bit=1 = forwarding to that destination port is allowed:
+	 *    - WAN group: Port 3 -> {4}, Port 4 -> {3}
+	 *    - LAN group: Port 0 -> {1,2,8}, Port 1 -> {0,2,8},
+	 *                 Port 2 -> {0,1,8}, Port 8 -> {0,1,2}
+	 */
+	/* NOTE: verified against the working 102 driver
+	 * (yt921x_port_isolation_set): bit=1 means forwarding to that
+	 * destination port is ALLOWED.  Write the allowed masks directly.
+	 */
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(0), 0x7ff, 0x106);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(1), 0x7ff, 0x105);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(2), 0x7ff, 0x103);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(8), 0x7ff, 0x007);
+
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(3), 0x7ff, 0x010);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(4), 0x7ff, 0x008);
+
 	/* 5. Configure Port 8 (SGMII primary conduit -> dp2 / eth0):
 	 *    - Enable interface (0x80028 |= BIT(0)) and ungate SerDes (0x80394 &= ~BIT(1))
 	 *    - Rev-SGMII mode (0x8006c + 8*4: mask 0x380, val 0x80)
-	 *    - Force 1000M full-duplex with RX/TX MAC + pause (0x80100 + 8*4 = 0x1fa,
-	 *      0x802d4 + 8*4 = 0x1a, 0x8036c + 8*4 = 0x1a, 0x80078 + 8*8 |= 0x80000)
+	 *    - Force 1000M full-duplex with RX/TX MAC + pause (0x80100 + 8*4 = 0x2fa,
+	 *      0x802d4 + 8*4 = 0x7a, 0x80078 + 8*8 |= 0x80000, 0x8036c + 8*4 = 0x1a)
 	 */
 	yt9215_smi_update_bits(mdiodev, YT921X_INTERFACE_CTRL, BIT(0), BIT(0));
 	yt9215_smi_update_bits(mdiodev, YT921X_SERDES_CTRL, BIT(1), 0);
 	yt9215_smi_update_bits(mdiodev, YT921X_SGMII_MODE(8), 0x380, 0x80);
+	yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(8), 0x2ff, 0x2fa);
 	yt9215_smi_update_bits(mdiodev, YT921X_SGMII_LINK(8), 0x7f, 0x7a);
 	yt9215_smi_update_bits(mdiodev, YT921X_MAC_EN(8), 0x80000, 0x80000);
 	yt9215_smi_write(mdiodev, YT921X_XMII_CTRL(8), 0x1a);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(8), 0x2ff, 0x2fa);
 
-	/* 6. Configure Port 4 (Internal GE PHY secondary conduit -> dp1 / eth1):
-	 *    Force 1000M full-duplex MAC & enable internal PHY 0..4 auto-negotiation
+	/* 6. Configure Port 4 (Internal GE PHY secondary conduit -> dp1 / eth1)
+	 *    and user ports 0..3 (Rear LAN 1..3 and Rear WAN):
+	 *    - Port 4 fixed 1000M full-duplex MAC (0x2fa)
+	 *    - Ports 0..3 enable MAC auto-negotiation / RX+TX MAC (0x2ff -> 0x2fa)
+	 *    - Power up and restart auto-negotiation on internal PHYs 0..4 (BMCR = 0x1340)
 	 */
 	yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(4), 0x2ff, 0x2fa);
 	for (p = 0; p <= 3; p++)
-		yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(p), 0x218, 0x218);
+		yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(p), 0x2ff, 0x2fa);
 
-	/* 7. Enable MAC learning on user ports 0..3 and conduit ports 4, 8 */
 	for (p = 0; p <= 4; p++)
-		yt9215_smi_write(mdiodev, YT921X_PORT_LEARN_CTRL(p), 0x3b5ed1 & ~0x20000);
-	yt9215_smi_write(mdiodev, YT921X_PORT_LEARN_CTRL(8), 0x3b5ed1 & ~0x20000);
-
-	/* 8. Option B Hardware Port Isolation Matrix (0x180294 + port * 4):
-	 *    NOTE: In YT9215, bit=1 in 0x180294 BLOCKS forwarding to that destination port,
-	 *    and bit=0 ALLOWS forwarding!
-	 *    - WAN group (Port 3 <-> Port 4, mask of allowed dests = 0x018):
-	 *      Port 3 allowed dest = BIT(4) (0x010) -> block mask = 0x7ff & ~0x010 = 0x7ef
-	 *      Port 4 allowed dest = BIT(3) (0x008) -> block mask = 0x7ff & ~0x008 = 0x7f7
-	 *    - LAN group (Port 0, 1, 2 <-> Port 8, mask of allowed dests = 0x107):
-	 *      Port 0 allowed dest = 0x106 -> block mask = 0x7ff & ~0x106 = 0x6f9
-	 *      Port 1 allowed dest = 0x105 -> block mask = 0x7ff & ~0x105 = 0x6fa
-	 *      Port 2 allowed dest = 0x103 -> block mask = 0x7ff & ~0x103 = 0x6fc
-	 *      Port 8 allowed dest = 0x007 -> block mask = 0x7ff & ~0x007 = 0x7f8
-	 */
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(0), 0x7ff, 0x7ff & ~0x106);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(1), 0x7ff, 0x7ff & ~0x105);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(2), 0x7ff, 0x7ff & ~0x103);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(8), 0x7ff, 0x7ff & ~0x007);
-
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(3), 0x7ff, 0x7ff & ~0x010);
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_ISOLATION(4), 0x7ff, 0x7ff & ~0x008);
-
-	/* 9. Power up and restart auto-negotiation on internal PHYs 0..4 (BMCR = 0x1340) */
-	for (p = 0; p <= 4; p++)
-		yt9215_int_phy_write(mdiodev, p, MII_BMCR, BMCR_ANENABLE | BMCR_ANRESTART | BMCR_FULLDPLX | BMCR_SPEED1000);
+		yt9215_int_phy_write(mdiodev, p, MII_BMCR,
+				     BMCR_ANENABLE | BMCR_ANRESTART | BMCR_FULLDPLX | BMCR_SPEED1000);
 
 	dev_info(&mdiodev->dev,
-		 "YT9215 Option B initialized (chip_id=0x%08x): WAN(P3<->P4/dp1) LAN(P0..2<->P8/dp2) untagged\n",
+		 "YT9215 Option B initialized (chip_id=0x%08x): WAN(P3<->P4/eth1) LAN(P0..2<->P8/eth0) untagged\n",
 		 chip_id);
 	return 0;
 }

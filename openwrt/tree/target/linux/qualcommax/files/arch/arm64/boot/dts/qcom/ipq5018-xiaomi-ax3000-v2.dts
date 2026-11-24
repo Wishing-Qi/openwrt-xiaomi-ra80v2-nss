@@ -334,6 +334,9 @@
 	status = "okay";
 	pinctrl-0 = <&mdio1_pins &switch_reset_pins>;
 	pinctrl-names = "default";
+	reset-gpios = <&tlmm 39 GPIO_ACTIVE_LOW>;
+	reset-assert-us = <10000>;
+	reset-deassert-us = <50000>;
 
 	/*
 	 * Motorcomm YT9215 switch at SMI address 0x1d, initialized in Option B
@@ -377,6 +380,7 @@
 /* GMAC0 -> Internal GE PHY -> YT9215 Port 4 -> Rear WAN (Port 3) [eth1] */
 &dp1 {
 	status = "okay";
+	label = "eth1";
 	phy-mode = "internal";
 	phy-handle = <&ge_phy>;
 	nvmem-cells = <&macaddr_art_0>;
@@ -386,6 +390,7 @@
 /* GMAC1 -> Uniphy SGMII -> YT9215 Port 8 -> Rear LAN 1..3 (Port 0..2) [eth0] */
 &dp2 {
 	status = "okay";
+	label = "eth0";
 	phy-mode = "sgmii";
 	nvmem-cells = <&macaddr_art_6>;
 	nvmem-cell-names = "mac-address";
@@ -406,6 +411,7 @@
 &wifi {
 	status = "okay";
 	qcom,rproc = <&q6_wcss_pd1>;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd1";
 	qcom,ath11k-fw-memory-mode = <2>;
 	qcom,bdf-addr = <0x4c400000>;
 	qcom,ath11k-calibration-variant = "Xiaomi-AX3000-v2";
