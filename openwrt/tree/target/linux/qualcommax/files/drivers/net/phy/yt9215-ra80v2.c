@@ -11,6 +11,7 @@
  *   - Rear LAN 1..3 (Port 0..2)<---> SGMII Port 8 (dp2 / eth0, Rev-SGMII 1000M)
  */
 
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/kernel.h>
@@ -18,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/phy.h>
+#include <linux/seq_file.h>
 
 #define YT9215_SWITCH_ID		0x0
 #define YT9215_REG_ADDR_HI_LO		((YT9215_SWITCH_ID << 2) | 0x0)
@@ -151,6 +153,25 @@ static int yt9215_smi_wait(struct mdio_device *mdiodev, u32 reg, u32 mask, u32 e
 	return -ETIMEDOUT;
 }
 
+static int yt9215_int_phy_read(struct mdio_device *mdiodev, int phy, int reg, u16 *val)
+{
+	u32 ctrl, din = 0;
+	int ret;
+
+	yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
+	ctrl = ((phy & 0x1f) << 21) | ((reg & 0x1f) << 16) | 0x8;
+	yt9215_smi_update_bits(mdiodev, YT921X_INT_MBUS_ADDR, 0x03fff00c, ctrl);
+	yt9215_smi_write(mdiodev, YT921X_INT_MBUS_OP, 1);
+	ret = yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
+	if (ret)
+		return ret;
+	ret = yt9215_smi_read(mdiodev, YT921X_INT_MBUS_DIN, &din);
+	if (ret)
+		return ret;
+	*val = (u16)(din & 0xffff);
+	return 0;
+}
+
 static int yt9215_int_phy_write(struct mdio_device *mdiodev, int phy, int reg, u16 val)
 {
 	u32 ctrl;
@@ -163,6 +184,102 @@ static int yt9215_int_phy_write(struct mdio_device *mdiodev, int phy, int reg, u
 	yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
 	return 0;
 }
+
+static struct mdio_device *yt9215_dbg_mdiodev;
+static u32 yt9215_dbg_last_reg = YT921X_CHIP_ID_REG;
+
+static int yt9215_dbg_show(struct seq_file *s, void *v)
+{
+	struct mdio_device *mdiodev = yt9215_dbg_mdiodev;
+	static const int ports[] = { 0, 1, 2, 3, 4, 8 };
+	u32 val = 0;
+	int i;
+
+	if (!mdiodev)
+		return -ENODEV;
+
+	yt9215_smi_read(mdiodev, yt9215_dbg_last_reg, &val);
+	seq_printf(s, "last_reg[0x%06x] = 0x%08x\n", yt9215_dbg_last_reg, val);
+
+	yt9215_smi_read(mdiodev, YT921X_GLOBAL_CTRL1, &val);
+	seq_printf(s, "GLOBAL_CTRL1 (0x080004) = 0x%08x\n", val);
+	yt9215_smi_read(mdiodev, YT921X_EXT_CPU_PORT_REG, &val);
+	seq_printf(s, "EXT_CPU_PORT (0x08000c) = 0x%08x\n", val);
+	yt9215_smi_read(mdiodev, YT921X_INTERFACE_CTRL, &val);
+	seq_printf(s, "IF_CTRL      (0x080028) = 0x%08x\n", val);
+	yt9215_smi_read(mdiodev, YT921X_SERDES_CTRL, &val);
+	seq_printf(s, "SERDES_CTRL  (0x080394) = 0x%08x\n", val);
+	yt9215_smi_read(mdiodev, YT921X_STP_STATE_REG, &val);
+	seq_printf(s, "STP_STATE    (0x18038c) = 0x%08x\n", val);
+	yt9215_smi_read(mdiodev, YT921X_VLAN1_LOW, &val);
+	seq_printf(s, "VLAN1_LOW    (0x188008) = 0x%08x\n", val);
+	yt9215_smi_read(mdiodev, YT921X_VLAN1_HIGH, &val);
+	seq_printf(s, "VLAN1_HIGH   (0x18800c) = 0x%08x\n\n", val);
+
+	for (i = 0; i < ARRAY_SIZE(ports); i++) {
+		int p = ports[i];
+		u32 pctrl = 0, sgmii = 0, macen = 0, xmii = 0, iso = 0, lrn = 0, pvid = 0;
+		u16 bmsr = 0, physr = 0;
+
+		yt9215_smi_read(mdiodev, YT921X_PORT_CTRL(p), &pctrl);
+		yt9215_smi_read(mdiodev, YT921X_SGMII_MODE(p), &sgmii);
+		yt9215_smi_read(mdiodev, YT921X_MAC_EN(p), &macen);
+		yt9215_smi_read(mdiodev, YT921X_XMII_CTRL(p), &xmii);
+		yt9215_smi_read(mdiodev, YT921X_PORT_ISOLATION(p), &iso);
+		yt9215_smi_read(mdiodev, YT921X_PORT_LEARN_DIS(p), &lrn);
+		yt9215_smi_read(mdiodev, YT921X_PORT_VLAN_CTRL(p), &pvid);
+		if (p <= 4) {
+			yt9215_int_phy_read(mdiodev, p, MII_BMSR, &bmsr);
+			yt9215_int_phy_read(mdiodev, p, 0x11, &physr);
+		}
+		seq_printf(s,
+			   "Port %d: CTRL=0x%08x SGMII=0x%08x MAC_EN=0x%08x XMII=0x%08x ISO=0x%03x LRN_DIS=0x%08x VLAN=0x%08x PHY_BMSR=0x%04x PHY_SR=0x%04x\n",
+			   p, pctrl, sgmii, macen, xmii, iso & 0x7ff, lrn, pvid, bmsr, physr);
+	}
+	return 0;
+}
+
+static int yt9215_dbg_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, yt9215_dbg_show, inode->i_private);
+}
+
+static ssize_t yt9215_dbg_write(struct file *file, const char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	struct mdio_device *mdiodev = yt9215_dbg_mdiodev;
+	char buf[64];
+	u32 reg = 0, val = 0;
+	int n;
+
+	if (!mdiodev)
+		return -ENODEV;
+	if (count >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, ubuf, count))
+		return -EFAULT;
+	buf[count] = '\0';
+
+	n = sscanf(buf, "%i %i", &reg, &val);
+	if (n == 1) {
+		yt9215_dbg_last_reg = reg;
+	} else if (n == 2) {
+		yt9215_dbg_last_reg = reg;
+		yt9215_smi_write(mdiodev, reg, val);
+	} else {
+		return -EINVAL;
+	}
+	return count;
+}
+
+static const struct file_operations yt9215_dbg_fops = {
+	.owner = THIS_MODULE,
+	.open = yt9215_dbg_open,
+	.read = seq_read,
+	.write = yt9215_dbg_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
 
 static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 {
@@ -233,11 +350,13 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	yt9215_smi_write(mdiodev, 0x300300, 0x0);
 	yt9215_smi_write(mdiodev, 0x300304, 0x0);
 
-	/* Default VLAN 1 & VLAN 2 membership (BIT(22)=0x400000 + FID<<23 + members<<7) */
-	yt9215_smi_write(mdiodev, YT921X_VLAN1_LOW, 0x400000U | (1U << 23) | (0x107U << 7));
-	yt9215_smi_write(mdiodev, YT921X_VLAN1_HIGH, 0x107U << 8);
-	yt9215_smi_write(mdiodev, YT921X_VLAN2_LOW, 0x400000U | (2U << 23) | (0x018U << 7));
-	yt9215_smi_write(mdiodev, YT921X_VLAN2_HIGH, 0x018U << 8);
+	/* Default VLAN 1 membership from yt921x_dsa_setup (0xff54..0xff6c):
+	 * 64-bit entry at 0x188008: low = 0x0043ff80 (BIT(22) | 0x7ff<<7), high = 0xffffffff.
+	 * Hardware separation between LAN {0,1,2,8} and WAN {3,4} is enforced by
+	 * YT921X_PORT_ISOLATION(p) (0x180294 + p*4).
+	 */
+	yt9215_smi_write(mdiodev, YT921X_VLAN1_LOW, 0x0043ff80U);
+	yt9215_smi_write(mdiodev, YT921X_VLAN1_HIGH, 0xffffffffU);
 
 	/* Buffer / QoS / scheduler initialization from yt921x_chip_setup */
 	yt9215_smi_write(mdiodev, 0x220104, 0x50);
@@ -301,10 +420,10 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 
 	/* 3. Per-port setup (yt921x_dsa_port_setup + bridge_join + STP FORWARDING):
 	 *    - 0x180200 + p*4 = 0x3b5ed1
-	 *    - 0x1803d0 + p*4 &= ~0x20000 (enable hardware MAC learning!)
+	 *    - 0x1803d0 + p*4 &= ~0x70007 (enable hardware MAC learning!)
 	 *    - 0x210010 + p*4 = 0x10 (unfiltered untagged mode)
 	 *    - 0x220108 + p*4 &= ~0x1f (clear standalone port storm/rate bits)
-	 *    - 0x230010 + p*4 = PVID (1 for LAN, 2 for WAN)
+	 *    - 0x230010 + p*4 = PVID 1 (1 << 6)
 	 *    - 0x230080 + p*4 &= ~0x3 (accept all untagged/tagged frames)
 	 *    - 0x18038c: set STP state = 3 (FORWARDING) for all active ports 0..4, 8
 	 */
@@ -315,8 +434,7 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 		yt9215_smi_update_bits(mdiodev, YT921X_PORT_LEARN_DIS(p), 0x70007, 0x0);
 		yt9215_smi_write(mdiodev, 0x210010 + p * 4, 0x10);
 		yt9215_smi_update_bits(mdiodev, 0x220108 + p * 4, 0x1f, 0x0);
-		yt9215_smi_update_bits(mdiodev, YT921X_PORT_VLAN_CTRL(p), 0x3ffc0,
-				       ((p == 3 || p == 4) ? 2 : 1) << 6);
+		yt9215_smi_update_bits(mdiodev, YT921X_PORT_VLAN_CTRL(p), 0x3ffc0, 1 << 6);
 		yt9215_smi_update_bits(mdiodev, 0x230080 + p * 4, 0x3, 0x0);
 		yt9215_smi_update_bits(mdiodev, YT921X_STP_STATE_REG,
 				       0x3 << (p * 2), 0x3 << (p * 2));
@@ -339,13 +457,13 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 
 	/* 5. Configure Port 8 (SGMII primary conduit -> dp2 / eth0):
 	 *    - Enable interface (0x80028 |= BIT(0)) and ungate SerDes (0x80394 &= ~BIT(1))
-	 *    - Rev-SGMII mode (0x8006c + 8*4: mask 0x380, val 0x80)
+	 *    - motorcomm,serdes-revsgmii mode (0x8006c + 8*4: mask 0x380, val 0x0 per 0xe4a8)
 	 *    - Force 1000M full-duplex with RX/TX MAC + pause (0x80100 + 8*4 = 0x2fa,
 	 *      0x8006c + 8*4 &= ~0x7f | 0x7a, 0x803c0 + 8*8 |= 0x80000, 0x80344 + 8*4 = 0x1a)
 	 */
 	yt9215_smi_update_bits(mdiodev, YT921X_INTERFACE_CTRL, BIT(0), BIT(0));
 	yt9215_smi_update_bits(mdiodev, YT921X_SERDES_CTRL, BIT(1), 0);
-	yt9215_smi_update_bits(mdiodev, YT921X_SGMII_MODE(8), 0x380, 0x80);
+	yt9215_smi_update_bits(mdiodev, YT921X_SGMII_MODE(8), 0x380, 0x0);
 	yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(8), 0x2ff, 0x2fa);
 	yt9215_smi_update_bits(mdiodev, YT921X_SGMII_LINK(8), 0x7f, 0x7a);
 	yt9215_smi_update_bits(mdiodev, YT921X_MAC_EN(8), 0x80000, 0x80000);
@@ -353,17 +471,21 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 
 	/* 6. Configure Port 4 (Internal GE PHY secondary conduit -> dp1 / eth1)
 	 *    and user ports 0..3 (Rear LAN 1..3 and Rear WAN):
-	 *    - Enable MAC (0x80100 + p*4 = 0x2fa, 0x803c0 + p*8 |= 0x80000)
+	 *    - Enable internal port MAC (0x80100 + p*4: mask 0xff, val 0xfa per 0xdf94,
+	 *      0x803c0 + p*8 |= 0x80000)
 	 *    - Power up and restart auto-negotiation on internal PHYs 0..4 (BMCR = 0x1340)
 	 */
 	for (p = 0; p <= 4; p++) {
-		yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(p), 0x2ff, 0x2fa);
+		yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(p), 0xff, 0xfa);
 		yt9215_smi_update_bits(mdiodev, YT921X_MAC_EN(p), 0x80000, 0x80000);
 	}
 
 	for (p = 0; p <= 4; p++)
 		yt9215_int_phy_write(mdiodev, p, MII_BMCR,
 				     BMCR_ANENABLE | BMCR_ANRESTART | BMCR_FULLDPLX | BMCR_SPEED1000);
+
+	yt9215_dbg_mdiodev = mdiodev;
+	debugfs_create_file("yt9215_regs", 0600, NULL, mdiodev, &yt9215_dbg_fops);
 
 	dev_info(&mdiodev->dev,
 		 "YT9215 Option B initialized (chip_id=0x%08x): WAN(P3<->P4/eth1) LAN(P0..2<->P8/eth0) untagged\n",

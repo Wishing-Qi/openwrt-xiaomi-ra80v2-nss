@@ -339,7 +339,7 @@ jobs:
             echo "| \`*-initramfs-uImage.itb\` | boots from RAM without touching flash, for testing / recovery |"
             echo
             echo "Default LAN address is **192.168.31.1**."
-            echo "Default Wi-Fi SSIDs: **Xiaomi-AX3000-2.4G-XXXX** / **Xiaomi-AX3000-5G-XXXX** (password: \`12345678\`)."
+            echo "Default Wi-Fi SSIDs: **Xiaomi-AX3000-2.4G-XXXX** / **Xiaomi-AX3000-5G-XXXX**."
             echo
             echo "Includes [SONiC fullcone NAT](https://github.com/mufeng05/openwrt-sonic-fullcone),"
             echo "**off by default**: tick Fullcone NAT under Network > Firewall > General"
