@@ -236,15 +236,21 @@ jobs:
             openwrt/staging_dir/toolchain-*
             openwrt/build_dir/host
             openwrt/build_dir/toolchain-*
-          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v2
+          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v3
 
       - name: Build or reuse host tools and toolchain
         run: |
           cd openwrt
           if [ "${{ steps.cache-toolchain.outputs.cache-hit }}" = "true" ]; then
-            echo "Restored prebuilt tools & toolchain from cache, refreshing stamp mtimes..."
+            echo "Restored prebuilt tools & toolchain from cache, ordering stamp mtimes..."
+            find build_dir/host build_dir/toolchain-* -name '.prepared*' -exec touch {} + 2>/dev/null || true
+            sleep 1
+            find build_dir/host build_dir/toolchain-* -name '.configured*' -exec touch {} + 2>/dev/null || true
+            sleep 1
+            find build_dir/host build_dir/toolchain-* -name '.built*' -exec touch {} + 2>/dev/null || true
+            sleep 1
             find staging_dir/host staging_dir/toolchain-* build_dir/host build_dir/toolchain-* \
-              \( -name '.built*' -o -name '.installed*' -o -name '.prepared*' -o -name '.configured*' -o -path '*/stamp/*' \) \
+              \( -name '.installed*' -o -path '*/stamp/*' -o -name '.*_installed*' -o -name '.*_compile*' \) \
               -exec touch {} + 2>/dev/null || true
           else
             echo "Building host tools and cross-toolchain..."
@@ -255,7 +261,7 @@ jobs:
           fi
 
       - name: Save prebuilt OpenWrt host tools and toolchain
-        if: always() && steps.cache-toolchain.outputs.cache-hit != 'true'
+        if: success() && steps.cache-toolchain.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -263,7 +269,7 @@ jobs:
             openwrt/staging_dir/toolchain-*
             openwrt/build_dir/host
             openwrt/build_dir/toolchain-*
-          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v2
+          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v3
 
       - name: Build target firmware
         id: build
@@ -294,7 +300,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           CUR_KEY="ccache-dl-${OPENWRT_REF}-${GITHUB_RUN_ID}"
-          TC_KEY="toolchain-${OPENWRT_REF}-qualcommax-ipq50xx-v2"
+          TC_KEY="toolchain-${OPENWRT_REF}-qualcommax-ipq50xx-v3"
           gh cache list --limit 100 --json id,key --jq ".[] | select(.key != \"$CUR_KEY\" and .key != \"$TC_KEY\") | .id" |
             while read -r cid; do
               [ -n "$cid" ] && gh cache delete "$cid" || true
