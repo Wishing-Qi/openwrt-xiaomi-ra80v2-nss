@@ -12,7 +12,7 @@ Signed-off-by: ra80v2-nss
 ---
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -780,6 +780,10 @@ struct ath11k {
+@@ -756,6 +756,10 @@ struct ath11k {
  	u32 chan_tx_pwr;
  	u32 num_stations;
  	struct survey_info survey[ATH11K_NUM_CHANS];
@@ -23,28 +23,21 @@ Signed-off-by: ra80v2-nss
  	struct completion bss_survey_done;
  
  	struct work_struct regd_update_work;
---- a/drivers/net/wireless/ath/ath11k/wmi.h
-+++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -234,6 +234,7 @@ enum wmi_tlv_cmd_id {
- 	WMI_PDEV_SET_BASE_MACADDR_CMDID,
- 	WMI_PDEV_SET_DSCP_TID_MAP_CMDID,
- 	WMI_PDEV_BSS_CHAN_INFO_REQUEST_CMDID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x16,
-+	WMI_PDEV_GET_NFCAL_POWER_CMDID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x1a,
- 	WMI_PDEV_SEND_FD_CMDID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x20,
- 	WMI_PDEV_SET_BIOS_SAR_TABLE_CMDID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x25,
- 	WMI_PDEV_SET_BIOS_INTERFACE_CMDID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x26,
-@@ -713,6 +714,7 @@ enum wmi_tlv_event_id {
- 	WMI_PDEV_CTL_FAILSAFE_CHECK_EVENTID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x09,
- 	WMI_PDEV_CSA_SWITCH_COUNT_STATUS_EVENTID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x0b,
- 	WMI_PDEV_BSS_CHAN_INFO_EVENTID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x16,
-+	WMI_PDEV_GET_NFCAL_POWER_EVENTID = WMI_TLV_CMD(WMI_GRP_PDEV) + 0x0f,
- 	WMI_VDEV_START_RESP_EVENTID = WMI_TLV_CMD(WMI_GRP_VDEV),
- 	WMI_VDEV_STOPPED_EVENTID,
- 	WMI_VDEV_DELETE_RESP_EVENTID,
-@@ -1910,6 +1912,24 @@ enum wmi_tlv_tag {
- 	WMI_TAG_VDEV_SET_TPC_POWER_CMD = 0x3b8,
- };
+@@ -1392,4 +1396,6 @@ void ath11k_nss_dp_ready(struct ath11k_base *ab);
+ void ath11k_nss_vif_event(struct ath11k *ar, struct ieee80211_vif *vif,
+ 			  bool add);
  
++int ath11k_wmi_pdev_get_nfcal_power(struct ath11k *ar);
++
+ #endif /* _CORE_H_ */
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -1479,6 +1479,168 @@ int ath11k_wmi_pdev_bss_chan_info_request(struct ath11k *ar,
+ 	return ret;
+ }
+ 
++#define WMI_PDEV_GET_NFCAL_POWER_CMDID		(WMI_TLV_CMD(WMI_GRP_PDEV) + 0x1a)
++#define WMI_PDEV_GET_NFCAL_POWER_EVENTID	(WMI_TLV_CMD(WMI_GRP_PDEV) + 0x0f)
 +#define WMI_TAG_PDEV_GET_NFCAL_POWER_CMD	0x2d0
 +#define WMI_TAG_PDEV_GET_NFCAL_POWER_EVENT	0x1db
 +#define WMI_TAG_NFCAL_POWER_ITEM		0x1eb
@@ -63,23 +56,6 @@ Signed-off-by: ra80v2-nss
 +	u32 reserved;
 +} __packed;
 +
- enum wmi_bss_chan_info_req_type {
- 	WMI_BSS_CHAN_INFO_READ_CLEAR = 1,
- 	WMI_BSS_CHAN_INFO_READ = 2,
-@@ -6370,6 +6390,7 @@ int ath11k_wmi_pdev_set_param(struct ath11k *ar, u32 param_id,
- 			      u32 param_value, u8 pdev_id);
- int ath11k_wmi_pdev_bss_chan_info_request(struct ath11k *ar,
- 					  enum wmi_bss_chan_info_req_type type);
-+int ath11k_wmi_pdev_get_nfcal_power(struct ath11k *ar);
- int ath11k_wmi_send_set_ap_ps_param_cmd(struct ath11k *ar, u8 *peer_addr,
- 					struct ath11k_wmi_ap_ps_arg *params);
- int ath11k_wmi_send_scan_start_cmd(struct ath11k *ar,
---- a/drivers/net/wireless/ath/ath11k/wmi.c
-+++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -2490,6 +2490,34 @@ int ath11k_wmi_pdev_bss_chan_info_request(struct ath11k *ar,
- 	return ret;
- }
- 
 +int ath11k_wmi_pdev_get_nfcal_power(struct ath11k *ar)
 +{
 +	struct ath11k_pdev_wmi *wmi = ar->wmi;
@@ -108,13 +84,6 @@ Signed-off-by: ra80v2-nss
 +	return ret;
 +}
 +
- int ath11k_wmi_send_set_ap_ps_param_cmd(struct ath11k *ar, u8 *peer_addr,
- 					struct ath11k_wmi_ap_ps_arg *params)
- {
-@@ -7800,6 +7828,114 @@ static void ath11k_wmi_pdev_bss_chan_info_event(struct ath11k_base *ab,
- 	complete(&ar->bss_survey_done);
- }
- 
 +#define ATH11K_NFCAL_MAX_ENTRIES 96
 +
 +struct wmi_nfcal_power_parse {
@@ -126,6 +95,12 @@ Signed-off-by: ra80v2-nss
 +	u16 num_freq;
 +	u16 num_valid;
 +};
++
++static int ath11k_wmi_tlv_iter(struct ath11k_base *ab, const void *ptr,
++			       size_t len,
++			       int (*itr)(struct ath11k_base *ab, u16 tag,
++					  u16 len, const void *ptr, void *data),
++			       void *data);
 +
 +static int ath11k_wmi_pdev_nfcal_power_parser(struct ath11k_base *ab,
 +					      u16 tag, u16 len,
@@ -223,10 +198,10 @@ Signed-off-by: ra80v2-nss
 +	kfree(tb);
 +}
 +
- static void ath11k_wmi_vdev_install_key_compl_event(struct ath11k_base *ab,
- 						    struct sk_buff *skb)
+ int ath11k_wmi_send_set_ap_ps_param_cmd(struct ath11k *ar, u8 *peer_addr,
+ 					struct ath11k_wmi_ap_ps_arg *params)
  {
-@@ -8380,6 +8518,9 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
+@@ -8816,6 +8978,9 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  	case WMI_PDEV_BSS_CHAN_INFO_EVENTID:
  		ath11k_wmi_pdev_bss_chan_info_event(ab, skb);
  		break;
@@ -238,24 +213,18 @@ Signed-off-by: ra80v2-nss
  		break;
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -8230,6 +8230,11 @@ static int ath11k_mac_op_get_survey(struct ieee80211_hw *hw, int idx,
- 	if (idx == 0) {
- 		reinit_completion(&ar->bss_survey_done);
- 
-+		if (time_after(jiffies, ar->nfcal_last_update + 10 * HZ)) {
-+			ar->nfcal_last_update = jiffies;
-+			ath11k_wmi_pdev_get_nfcal_power(ar);
-+		}
-+
- 		ret = ath11k_wmi_pdev_bss_chan_info_request(ar,
- 							    WMI_BSS_CHAN_INFO_READ);
- 		if (ret) {
-@@ -8253,6 +8258,22 @@ static int ath11k_mac_op_get_survey(struct ieee80211_hw *hw, int idx,
+@@ -8250,6 +8250,28 @@ static int ath11k_mac_op_get_survey(struct ieee80211_hw *hw, int idx,
  	spin_lock_bh(&ar->data_lock);
  	memcpy(survey, &ar->survey[idx], sizeof(*survey));
  	spin_unlock_bh(&ar->data_lock);
-+	if (ar->nfcal_count && survey->channel) {
-+		u32 freq = survey->channel->center_freq;
++
++	if (time_after(jiffies, ar->nfcal_last_update + 10 * HZ)) {
++		ar->nfcal_last_update = jiffies;
++		ath11k_wmi_pdev_get_nfcal_power(ar);
++	}
++
++	if (ar->nfcal_count) {
++		u32 freq = sband->channels[idx].center_freq;
 +		u32 best_diff = U32_MAX;
 +		u8 best = 0;
 +		u8 i;
@@ -270,10 +239,10 @@ Signed-off-by: ra80v2-nss
 +		survey->filled |= SURVEY_INFO_NOISE_DBM;
 +		survey->noise = ar->nfcal_power[best];
 +	}
- 	ret = 0;
  
- 	if (!survey->filled)
-@@ -9180,6 +9199,11 @@ int ath11k_mac_fw_stats_request(struct ath11k *ar,
+ 	survey->channel = &sband->channels[idx];
+ 
+@@ -9190,6 +9212,11 @@ int ath11k_mac_fw_stats_request(struct ath11k *ar,
  	unsigned long timeout, time_left;
  	int ret;
  
