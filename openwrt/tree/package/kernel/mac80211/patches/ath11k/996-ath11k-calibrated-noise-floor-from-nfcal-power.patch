@@ -5,8 +5,8 @@ On QCN6122 (5 GHz) and IPQ5018, WMI_PDEV_BSS_CHAN_INFO_EVENTID reports an
 uncalibrated raw noise floor (around -116 dBm on QCN6122) once the radio
 enters AP mode. Query WMI_PDEV_GET_NFCAL_POWER_CMDID (0x401a, rate-limited
 to once every 10 seconds during survey / fw_stats requests) and parse
-WMI_PDEV_GET_NFCAL_POWER_EVENTID (0x400f) to populate survey->noise with the
-firmware-calibrated noise floor for the matching channel frequency.
+WMI_PDEV_GET_NFCAL_POWER_EVENTID (0x400f) to populate ar->survey[].noise
+with the firmware-calibrated noise floor.
 
 Signed-off-by: ra80v2-nss
 ---
@@ -32,7 +32,7 @@ Signed-off-by: ra80v2-nss
  #endif /* _CORE_H_ */
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -1479,6 +1479,168 @@ int ath11k_wmi_pdev_bss_chan_info_request(struct ath11k *ar,
+@@ -1479,6 +1479,184 @@ int ath11k_wmi_pdev_bss_chan_info_request(struct ath11k *ar,
  	return ret;
  }
  
@@ -145,6 +145,21 @@ Signed-off-by: ra80v2-nss
 +	return 0;
 +}
 +
++static void ath11k_wmi_sync_nfcal_survey(struct ath11k *ar)
++{
++	u16 i;
++
++	if (!ar || !ar->nfcal_count)
++		return;
++
++	spin_lock_bh(&ar->data_lock);
++	for (i = 0; i < ARRAY_SIZE(ar->survey); i++) {
++		ar->survey[i].noise = (s8)ar->nfcal_power[0];
++		ar->survey[i].filled |= SURVEY_INFO_NOISE_DBM;
++	}
++	spin_unlock_bh(&ar->data_lock);
++}
++
 +static void ath11k_wmi_pdev_nfcal_power_event(struct ath11k_base *ab,
 +					      struct sk_buff *skb)
 +{
@@ -190,6 +205,7 @@ Signed-off-by: ra80v2-nss
 +				    ar->nfcal_power[0], ar->nfcal_freq[0],
 +				    count);
 +		ar->nfcal_count = count;
++		ath11k_wmi_sync_nfcal_survey(ar);
 +	} else {
 +		ar->nfcal_count = 0;
 +	}
@@ -201,9 +217,16 @@ Signed-off-by: ra80v2-nss
  int ath11k_wmi_send_set_ap_ps_param_cmd(struct ath11k *ar, u8 *peer_addr,
  					struct ath11k_wmi_ap_ps_arg *params)
  {
-@@ -8816,6 +8978,9 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
+@@ -8816,6 +8994,16 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  	case WMI_PDEV_BSS_CHAN_INFO_EVENTID:
  		ath11k_wmi_pdev_bss_chan_info_event(ab, skb);
++		{
++			u8 i;
++
++			for (i = 0; i < ab->num_radios; i++)
++				if (ab->pdevs[i].ar)
++					ath11k_wmi_sync_nfcal_survey(ab->pdevs[i].ar);
++		}
  		break;
 +	case WMI_PDEV_GET_NFCAL_POWER_EVENTID:
 +		ath11k_wmi_pdev_nfcal_power_event(ab, skb);
@@ -213,41 +236,7 @@ Signed-off-by: ra80v2-nss
  		break;
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -8250,11 +8250,33 @@ static int ath11k_mac_op_get_survey(struct ieee80211_hw *hw, int idx,
- 	ath11k_mac_update_bss_chan_survey(ar, &sband->channels[idx]);
- 
- 	spin_lock_bh(&ar->data_lock);
- 	memcpy(survey, ar_survey, sizeof(*survey));
- 	spin_unlock_bh(&ar->data_lock);
- 
- 	survey->channel = &sband->channels[idx];
-+
-+	if (time_after(jiffies, ar->nfcal_last_update + 10 * HZ)) {
-+		ar->nfcal_last_update = jiffies;
-+		ath11k_wmi_pdev_get_nfcal_power(ar);
-+	}
-+
-+	if (ar->nfcal_count) {
-+		u32 freq = survey->channel->center_freq;
-+		u32 best_diff = U32_MAX;
-+		u8 best = 0;
-+		u8 i;
-+
-+		for (i = 0; i < ar->nfcal_count; i++) {
-+			u32 diff = abs((s32)ar->nfcal_freq[i] - (s32)freq);
-+			if (diff < best_diff) {
-+				best_diff = diff;
-+				best = i;
-+			}
-+		}
-+		survey->filled |= SURVEY_INFO_NOISE_DBM;
-+		survey->noise = ar->nfcal_power[best];
-+	}
- 
- 	if (survey->channel == ar->rx_channel)
- 		survey->filled |= SURVEY_INFO_IN_USE;
- 
-@@ -9190,6 +9212,11 @@ int ath11k_mac_fw_stats_request(struct ath11k *ar,
+@@ -9190,6 +9190,11 @@ int ath11k_mac_fw_stats_request(struct ath11k *ar,
  	unsigned long timeout, time_left;
  	int ret;
  
