@@ -1,0 +1,35 @@
+--- a/src/hsl/phy/hsl_phy.c
++++ b/src/hsl/phy/hsl_phy.c
+@@ -510,9 +510,19 @@ a_uint32_t
+ qca_ssdk_phydev_to_port(a_uint32_t dev_id, struct phy_device *phydev)
+ {
+ 	a_uint32_t miibus_id = 0, phy_addr_e = 0;
++	a_uint32_t port_id = 0, i = 0;
+ 
+ 	miibus_id = ssdk_miibus_index_get(dev_id, phydev->mdio.bus);
+ 	phy_addr_e = TO_PHY_ADDR_E(phydev->mdio.addr, miibus_id);
+ 
+-	return qca_ssdk_phy_addr_to_port(dev_id, phy_addr_e);
++	port_id = qca_ssdk_phy_addr_to_port(dev_id, phy_addr_e);
++	if (port_id != 0)
++		return port_id;
++
++	for (i = SSDK_PHYSICAL_PORT1; i < SW_MAX_NR_PORT; i++) {
++		if ((port_bmp[dev_id] & BIT(i)) &&
++		    hsl_port_feature_get(dev_id, i, PHY_F_FORCE))
++			return i;
++	}
++	return 0;
+ }
+--- a/src/adpt/mp/adpt_mp_portctrl.c
++++ b/src/adpt/mp/adpt_mp_portctrl.c
+@@ -995,6 +995,9 @@ _adpt_mp_port_phy_status_get(a_uint32_t
+ 	ADPT_DEV_ID_CHECK(dev_id);
+ 	ADPT_NULL_POINT_CHECK(phy_status);
+ 
++	if (hsl_port_feature_get(dev_id, port_id, PHY_F_FORCE))
++		return hsl_port_phy_status_get(dev_id, port_id, phy_status);
++
+ 	rv = hsl_port_phydev_get_status(dev_id, port_id, phy_status);
+ 
+ 	return rv;

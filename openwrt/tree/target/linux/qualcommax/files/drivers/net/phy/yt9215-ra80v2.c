@@ -33,11 +33,11 @@
 #define YT921X_CPU_TAG_TPID_REG		0x80010
 #define YT921X_INTERFACE_CTRL		0x80028
 #define YT921X_SGMII_MODE(p)		(0x8006c + (p) * 4)
-#define YT921X_MAC_EN(p)		(0x80078 + (p) * 8)
+#define YT921X_MAC_EN(p)		(0x803c0 + (p) * 8)
 #define YT921X_PORT_CTRL(p)		(0x80100 + (p) * 4)
 #define YT921X_LOOP_DETECT		0x80230
-#define YT921X_SGMII_LINK(p)		(0x802d4 + (p) * 4)
-#define YT921X_XMII_CTRL(p)		(0x8036c + (p) * 4)
+#define YT921X_SGMII_LINK(p)		(0x8006c + (p) * 4)
+#define YT921X_XMII_CTRL(p)		(0x80344 + (p) * 4)
 #define YT921X_SERDES_CTRL		0x80394
 
 /* Internal PHY MBUS indirect controller */
@@ -219,7 +219,10 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	for (r = YT921X_FLOOD_CTRL_BASE; r < YT921X_FLOOD_CTRL_END; r += 4)
 		yt9215_smi_update_bits(mdiodev, r, 0xff, 0xff);
 
+	yt9215_smi_update_bits(mdiodev, 0x18047c, 0xdf0, 0xca0);
 	yt9215_smi_update_bits(mdiodev, 0x180280, 0x3ff800, 0x3ff800);
+	yt9215_smi_write(mdiodev, 0x180500, 0x7ff);
+	yt9215_smi_write(mdiodev, 0x180504, 0x7ff);
 	yt9215_smi_write(mdiodev, 0x180508, 0x7ff);
 	yt9215_smi_write(mdiodev, 0x18050c, 0x7ff);
 	yt9215_smi_write(mdiodev, 0x180510, 0x7ff);
@@ -230,10 +233,10 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	yt9215_smi_write(mdiodev, 0x300300, 0x0);
 	yt9215_smi_write(mdiodev, 0x300304, 0x0);
 
-	/* Default VLAN 1 membership: all 11 ports (0x7ff) untagged */
-	yt9215_smi_write(mdiodev, YT921X_VLAN1_LOW, (1U << 23) | (0x107U << 7));
+	/* Default VLAN 1 & VLAN 2 membership (BIT(22)=0x400000 + FID<<23 + members<<7) */
+	yt9215_smi_write(mdiodev, YT921X_VLAN1_LOW, 0x400000U | (1U << 23) | (0x107U << 7));
 	yt9215_smi_write(mdiodev, YT921X_VLAN1_HIGH, 0x107U << 8);
-	yt9215_smi_write(mdiodev, YT921X_VLAN2_LOW, (2U << 23) | (0x018U << 7));
+	yt9215_smi_write(mdiodev, YT921X_VLAN2_LOW, 0x400000U | (2U << 23) | (0x018U << 7));
 	yt9215_smi_write(mdiodev, YT921X_VLAN2_HIGH, 0x018U << 8);
 
 	/* Buffer / QoS / scheduler initialization from yt921x_chip_setup */
@@ -272,20 +275,19 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 
 	/* Egress packet buffer & AC queue quota setup (yt921x_chip_setup 0x10390..0x10474) */
 	yt9215_smi_write(mdiodev, 0x2801d0, 0xc8);
-	for (p = 0; p < 11; p++) {
-		if (p > 4 && p != 8 && p != 9)
-			continue;
+	for (p = 0; p < 10; p++) {
 		if (p != 4) {
 			yt9215_smi_write(mdiodev, 0x281000 + p * 8, 0x80402850U);
 			yt9215_smi_write(mdiodev, 0x281004 + p * 8, 0x26f1bU);
+		} else {
+			yt9215_smi_write(mdiodev, 0x281020, 0x40020U);
+			yt9215_smi_write(mdiodev, 0x281024, 0x26765U);
 		}
-		for (q = 0; q < 8; q++)
-			yt9215_smi_write(mdiodev, 0x301000 + (p * 8 + q) * 4, 0x40020U);
-		for (q = 0; q < 4; q++)
-			yt9215_smi_write(mdiodev, 0x301200 + (p * 4 + q) * 4, 0x40020U);
+		for (q = 0; q < 8; q++) {
+			yt9215_smi_write(mdiodev, 0x301000 + (p * 8 + q) * 8, 0x40020U);
+			yt9215_smi_write(mdiodev, 0x301004 + (p * 8 + q) * 8, 0x0U);
+		}
 	}
-	yt9215_smi_write(mdiodev, 0x281020, 0x1);
-	yt9215_smi_write(mdiodev, 0x281024, 0x26765U);
 	for (p = 0; p <= 3; p++)
 		yt9215_smi_write(mdiodev, 0x303000 + p * 4, 0x78);
 	yt9215_smi_write(mdiodev, 0x303020, 0x78);
@@ -297,10 +299,13 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	yt9215_smi_update_bits(mdiodev, 0x8036c, 0x40000, 0x40000);
 	yt9215_smi_update_bits(mdiodev, 0x180958, 0x1, 0x1);
 
-	/* 3. Per-port setup (yt921x_dsa_port_setup + STP FORWARDING):
+	/* 3. Per-port setup (yt921x_dsa_port_setup + bridge_join + STP FORWARDING):
 	 *    - 0x180200 + p*4 = 0x3b5ed1
 	 *    - 0x1803d0 + p*4 &= ~0x20000 (enable hardware MAC learning!)
-	 *    - 0x230010 + p*4 = 0x00000040 (default PVID = 1)
+	 *    - 0x210010 + p*4 = 0x10 (unfiltered untagged mode)
+	 *    - 0x220108 + p*4 &= ~0x1f (clear standalone port storm/rate bits)
+	 *    - 0x230010 + p*4 = PVID (1 for LAN, 2 for WAN)
+	 *    - 0x230080 + p*4 &= ~0x3 (accept all untagged/tagged frames)
 	 *    - 0x18038c: set STP state = 3 (FORWARDING) for all active ports 0..4, 8
 	 */
 	for (p = 0; p < 11; p++) {
@@ -308,8 +313,11 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 			continue;
 		yt9215_smi_write(mdiodev, YT921X_PORT_LEARN_CTRL(p), 0x3b5ed1);
 		yt9215_smi_update_bits(mdiodev, YT921X_PORT_LEARN_DIS(p), 0x70007, 0x0);
+		yt9215_smi_write(mdiodev, 0x210010 + p * 4, 0x10);
+		yt9215_smi_update_bits(mdiodev, 0x220108 + p * 4, 0x1f, 0x0);
 		yt9215_smi_update_bits(mdiodev, YT921X_PORT_VLAN_CTRL(p), 0x3ffc0,
 				       ((p == 3 || p == 4) ? 2 : 1) << 6);
+		yt9215_smi_update_bits(mdiodev, 0x230080 + p * 4, 0x3, 0x0);
 		yt9215_smi_update_bits(mdiodev, YT921X_STP_STATE_REG,
 				       0x3 << (p * 2), 0x3 << (p * 2));
 	}
@@ -333,7 +341,7 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	 *    - Enable interface (0x80028 |= BIT(0)) and ungate SerDes (0x80394 &= ~BIT(1))
 	 *    - Rev-SGMII mode (0x8006c + 8*4: mask 0x380, val 0x80)
 	 *    - Force 1000M full-duplex with RX/TX MAC + pause (0x80100 + 8*4 = 0x2fa,
-	 *      0x802d4 + 8*4 = 0x7a, 0x80078 + 8*8 |= 0x80000, 0x8036c + 8*4 = 0x1a)
+	 *      0x8006c + 8*4 &= ~0x7f | 0x7a, 0x803c0 + 8*8 |= 0x80000, 0x80344 + 8*4 = 0x1a)
 	 */
 	yt9215_smi_update_bits(mdiodev, YT921X_INTERFACE_CTRL, BIT(0), BIT(0));
 	yt9215_smi_update_bits(mdiodev, YT921X_SERDES_CTRL, BIT(1), 0);
@@ -345,13 +353,13 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 
 	/* 6. Configure Port 4 (Internal GE PHY secondary conduit -> dp1 / eth1)
 	 *    and user ports 0..3 (Rear LAN 1..3 and Rear WAN):
-	 *    - Port 4 fixed 1000M full-duplex MAC (0x2fa)
-	 *    - Ports 0..3 enable MAC auto-negotiation / RX+TX MAC (0x2ff -> 0x2fa)
+	 *    - Enable MAC (0x80100 + p*4 = 0x2fa, 0x803c0 + p*8 |= 0x80000)
 	 *    - Power up and restart auto-negotiation on internal PHYs 0..4 (BMCR = 0x1340)
 	 */
-	yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(4), 0x2ff, 0x2fa);
-	for (p = 0; p <= 3; p++)
+	for (p = 0; p <= 4; p++) {
 		yt9215_smi_update_bits(mdiodev, YT921X_PORT_CTRL(p), 0x2ff, 0x2fa);
+		yt9215_smi_update_bits(mdiodev, YT921X_MAC_EN(p), 0x80000, 0x80000);
+	}
 
 	for (p = 0; p <= 4; p++)
 		yt9215_int_phy_write(mdiodev, p, MII_BMCR,
