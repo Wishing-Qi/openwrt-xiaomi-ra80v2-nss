@@ -87,6 +87,9 @@ jobs:
         run: |
           ccache -M 2G
           ccache -o compression=true
+          ccache -o base_dir="$GITHUB_WORKSPACE/openwrt"
+          ccache -o compiler_check=content
+          ccache -o sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
           ccache -z
           ccache -s
 
@@ -231,17 +234,24 @@ jobs:
           path: |
             openwrt/staging_dir/host
             openwrt/staging_dir/toolchain-*
-          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v1
+            openwrt/build_dir/host
+            openwrt/build_dir/toolchain-*
+          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v2
 
       - name: Build or reuse host tools and toolchain
         run: |
           cd openwrt
           if [ "${{ steps.cache-toolchain.outputs.cache-hit }}" = "true" ]; then
             echo "Restored prebuilt tools & toolchain from cache, refreshing stamp mtimes..."
-            find staging_dir/host staging_dir/toolchain-* -name '.*' -exec touch {} + 2>/dev/null || true
+            find staging_dir/host staging_dir/toolchain-* build_dir/host build_dir/toolchain-* \
+              \( -name '.built*' -o -name '.installed*' -o -name '.prepared*' -o -name '.configured*' -o -path '*/stamp/*' \) \
+              -exec touch {} + 2>/dev/null || true
           else
             echo "Building host tools and cross-toolchain..."
             make -j$(nproc) tools/install toolchain/install
+            # Strip large intermediate source trees inside build_dir/host and build_dir/toolchain-*
+            # while keeping all OpenWrt top-level dot-stamps (.prepared*, .configured*, .built*, .installed*)
+            find build_dir/host build_dir/toolchain-* -mindepth 2 -maxdepth 2 ! -name '.*' -exec rm -rf {} + 2>/dev/null || true
           fi
 
       - name: Save prebuilt OpenWrt host tools and toolchain
@@ -251,7 +261,9 @@ jobs:
           path: |
             openwrt/staging_dir/host
             openwrt/staging_dir/toolchain-*
-          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v1
+            openwrt/build_dir/host
+            openwrt/build_dir/toolchain-*
+          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v2
 
       - name: Build target firmware
         id: build
@@ -282,7 +294,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           CUR_KEY="ccache-dl-${OPENWRT_REF}-${GITHUB_RUN_ID}"
-          TC_KEY="toolchain-${OPENWRT_REF}-qualcommax-ipq50xx-v1"
+          TC_KEY="toolchain-${OPENWRT_REF}-qualcommax-ipq50xx-v2"
           gh cache list --limit 100 --json id,key --jq ".[] | select(.key != \"$CUR_KEY\" and .key != \"$TC_KEY\") | .id" |
             while read -r cid; do
               [ -n "$cid" ] && gh cache delete "$cid" || true

@@ -25,7 +25,8 @@ fi
 # ---------------------------------------------------------------- 2. tracked edits
 say "Applying edits to upstream files"
 PATCH="$HERE/openwrt/0001-xiaomi-ra80v2-nss.patch"
-if git -C "$OW" apply --reverse --check "$PATCH" 2>/dev/null; then
+if git -C "$OW" apply --reverse --check "$PATCH" 2>/dev/null || \
+   grep -q 'SSDK_MATCH_PHY_DRV' "$OW/package/kernel/qca-ssdk/Makefile" 2>/dev/null; then
     echo "already applied, skipping"
 else
     git -C "$OW" apply --verbose "$PATCH"
