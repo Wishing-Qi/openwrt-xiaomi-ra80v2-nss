@@ -22,4 +22,5 @@ fi
 
 /etc/init.d/nss-offload enable
 /etc/init.d/nss-ecm enable
+/etc/init.d/ra80v2-diag-log enable 2>/dev/null || true
 exit 0

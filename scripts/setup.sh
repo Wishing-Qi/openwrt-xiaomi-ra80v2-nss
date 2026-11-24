@@ -77,6 +77,13 @@ if ! grep -q 'xiaomi,ax3000-v2)' "$NET_SH"; then
 \t\t;;' "$NET_SH"
 fi
 
+# Ensure qca-ssdk is loaded in modules-boot.d before qca-nss-dp (31-qca-nss-dp)
+# so IPQ5018 Uniphy SGMII (dp2/eth0) is initialized in both preinit/failsafe and normal boot.
+SSDK_MK="$OW/package/kernel/qca-ssdk/Makefile"
+if [ -f "$SSDK_MK" ] && ! grep -q 'AutoLoad,30,qca-ssdk,1' "$SSDK_MK"; then
+    sed -i 's/AutoLoad,30,qca-ssdk)/AutoLoad,30,qca-ssdk,1)/' "$SSDK_MK"
+fi
+
 CAL_SH="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata"
 if ! grep -q 'xiaomi,ax3000-v2)' "$CAL_SH"; then
     sed -i '/"ath11k\/IPQ5018\/hw1.0\/cal-ahb-c000000.wifi.bin")/,/esac/{

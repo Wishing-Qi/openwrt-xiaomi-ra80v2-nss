@@ -54,7 +54,8 @@ index a5588d5032..d64c8ffdcd 100644
 -  DEPENDS:=@(TARGET_qualcommax)
 +  DEPENDS:=@(TARGET_qualcommax) +kmod-swconfig
    FILES:=$(PKG_BUILD_DIR)/qca-ssdk.ko
-   AUTOLOAD:=$(call AutoLoad,30,qca-ssdk)
+-  AUTOLOAD:=$(call AutoLoad,30,qca-ssdk)
++  AUTOLOAD:=$(call AutoLoad,30,qca-ssdk,1)
  endef
 @@ -34,11 +34,26 @@ GCC_VERSION=$(shell echo "$(CONFIG_GCC_VERSION)" | sed 's/[^0-9.]*\([0-9.]*\).*/
  

@@ -345,7 +345,7 @@
 	 *   - Port 0, 1, 2 (LAN)<---> Port 8 (Rev-SGMII 1000M -> dp2 / eth0)
 	 *   - CPU tag (0x9988) disabled so NSS offloads standard Ethernet frames.
 	 */
-	switch@1d {
+	ethernet-switch@1d {
 		compatible = "motorcomm,yt9215-ra80v2";
 		reg = <0x1d>;
 	};

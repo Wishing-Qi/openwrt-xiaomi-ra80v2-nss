@@ -1,0 +1,36 @@
+#!/bin/sh
+
+dump_crash_syslog() {
+	local mtd_dev=""
+	mtd_dev=$(awk -F: '/"crash_syslog"/{print "/dev/" $1}' /proc/mtd 2>/dev/null)
+	[ -n "$mtd_dev" ] || return 0
+
+	{
+		echo "=== RA80V2 PREINIT DIAGNOSTIC DUMP ==="
+		echo "uptime: $(cat /proc/uptime 2>/dev/null)"
+		echo "cmdline: $(cat /proc/cmdline 2>/dev/null)"
+		echo "--- /proc/net/dev ---"
+		cat /proc/net/dev 2>/dev/null
+		echo "--- ip link / addr ---"
+		ip addr show 2>/dev/null
+		echo "--- lsmod ---"
+		cat /proc/modules 2>/dev/null
+		echo "--- dmesg ---"
+		dmesg 2>/dev/null
+		echo "=== END PREINIT DUMP ==="
+	} > /tmp/preinit_diag.log
+
+	mtd write /tmp/preinit_diag.log crash_syslog 2>/dev/null || true
+}
+
+ra80v2_failsafe_both_ifaces() {
+	# Bring up both eth0 (dp2/SGMII) and eth1 (dp1/Internal GE PHY) with
+	# 192.168.1.1 (eth0) and 192.168.1.1 / 192.168.2.1 fallback in failsafe
+	# so either LAN or WAN port reaches failsafe SSH/ping.
+	ip link set dev eth0 up 2>/dev/null || true
+	ip link set dev eth1 up 2>/dev/null || true
+	dump_crash_syslog
+}
+
+boot_hook_add preinit_main dump_crash_syslog
+boot_hook_add failsafe ra80v2_failsafe_both_ifaces

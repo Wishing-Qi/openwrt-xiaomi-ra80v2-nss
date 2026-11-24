@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+
+boot() {
+	(
+		sleep 20
+		{
+			echo "=== RA80V2 FULL BOOT DIAGNOSTIC DUMP (+20s) ==="
+			echo "uptime: $(cat /proc/uptime 2>/dev/null)"
+			echo "--- ip addr ---"
+			ip -d addr show 2>/dev/null
+			echo "--- brctl / bridge link ---"
+			bridge link show 2>/dev/null
+			echo "--- lsmod ---"
+			lsmod 2>/dev/null
+			echo "--- wifi status ---"
+			ubus call network.wireless status 2>/dev/null
+			echo "--- nss stats ---"
+			ls -la /sys/kernel/debug/qca-nss-drv/stats/ 2>/dev/null
+			echo "--- dmesg ---"
+			dmesg 2>/dev/null
+			echo "=== END FULL BOOT DUMP ==="
+		} > /tmp/boot_diag.log
+		mtd write /tmp/boot_diag.log crash_syslog 2>/dev/null || true
+	) &
+}
