@@ -213,10 +213,14 @@ Signed-off-by: ra80v2-nss
  		break;
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -8250,6 +8250,28 @@ static int ath11k_mac_op_get_survey(struct ieee80211_hw *hw, int idx,
+@@ -8250,11 +8250,33 @@ static int ath11k_mac_op_get_survey(struct ieee80211_hw *hw, int idx,
+ 	ath11k_mac_update_bss_chan_survey(ar, &sband->channels[idx]);
+ 
  	spin_lock_bh(&ar->data_lock);
- 	memcpy(survey, &ar->survey[idx], sizeof(*survey));
+ 	memcpy(survey, ar_survey, sizeof(*survey));
  	spin_unlock_bh(&ar->data_lock);
+ 
+ 	survey->channel = &sband->channels[idx];
 +
 +	if (time_after(jiffies, ar->nfcal_last_update + 10 * HZ)) {
 +		ar->nfcal_last_update = jiffies;
@@ -224,7 +228,7 @@ Signed-off-by: ra80v2-nss
 +	}
 +
 +	if (ar->nfcal_count) {
-+		u32 freq = sband->channels[idx].center_freq;
++		u32 freq = survey->channel->center_freq;
 +		u32 best_diff = U32_MAX;
 +		u8 best = 0;
 +		u8 i;
@@ -240,7 +244,8 @@ Signed-off-by: ra80v2-nss
 +		survey->noise = ar->nfcal_power[best];
 +	}
  
- 	survey->channel = &sband->channels[idx];
+ 	if (survey->channel == ar->rx_channel)
+ 		survey->filled |= SURVEY_INFO_IN_USE;
  
 @@ -9190,6 +9212,11 @@ int ath11k_mac_fw_stats_request(struct ath11k *ar,
  	unsigned long timeout, time_left;
