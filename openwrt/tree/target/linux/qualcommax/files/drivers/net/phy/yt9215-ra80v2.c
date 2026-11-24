@@ -60,6 +60,8 @@
 #define YT921X_L2_ENABLE_REG		0x180690
 #define YT921X_VLAN1_LOW		0x188008
 #define YT921X_VLAN1_HIGH		0x18800c
+#define YT921X_VLAN2_LOW		0x188010
+#define YT921X_VLAN2_HIGH		0x188014
 #define YT921X_PORT_VLAN_CTRL(p)	(0x230010 + (p) * 4)
 
 static int yt9215_smi_read(struct mdio_device *mdiodev, u32 reg, u32 *val)
@@ -217,12 +219,11 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	for (r = YT921X_FLOOD_CTRL_BASE; r < YT921X_FLOOD_CTRL_END; r += 4)
 		yt9215_smi_update_bits(mdiodev, r, 0xff, 0xff);
 
-	yt9215_smi_update_bits(mdiodev, 0x18047c, 0xdf0, 0xca0);
 	yt9215_smi_update_bits(mdiodev, 0x180280, 0x3ff800, 0x3ff800);
-	yt9215_smi_write(mdiodev, 0x180508, 0x51f);
-	yt9215_smi_write(mdiodev, 0x18050c, 0x51f);
-	yt9215_smi_write(mdiodev, 0x180510, 0x51f);
-	yt9215_smi_write(mdiodev, 0x180514, 0x400);
+	yt9215_smi_write(mdiodev, 0x180508, 0x7ff);
+	yt9215_smi_write(mdiodev, 0x18050c, 0x7ff);
+	yt9215_smi_write(mdiodev, 0x180510, 0x7ff);
+	yt9215_smi_write(mdiodev, 0x180514, 0x7ff);
 	yt9215_smi_write(mdiodev, 0x180734, 0x0);
 	yt9215_smi_write(mdiodev, 0x180738, 0x400000);
 	yt9215_smi_write(mdiodev, 0x180448, 0x7ff);
@@ -230,8 +231,10 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	yt9215_smi_write(mdiodev, 0x300304, 0x0);
 
 	/* Default VLAN 1 membership: all 11 ports (0x7ff) untagged */
-	yt9215_smi_write(mdiodev, YT921X_VLAN1_LOW, 0x0043ff80U);
-	yt9215_smi_write(mdiodev, YT921X_VLAN1_HIGH, 0x0);
+	yt9215_smi_write(mdiodev, YT921X_VLAN1_LOW, (1U << 23) | (0x107U << 7));
+	yt9215_smi_write(mdiodev, YT921X_VLAN1_HIGH, 0x107U << 8);
+	yt9215_smi_write(mdiodev, YT921X_VLAN2_LOW, (2U << 23) | (0x018U << 7));
+	yt9215_smi_write(mdiodev, YT921X_VLAN2_HIGH, 0x018U << 8);
 
 	/* Buffer / QoS / scheduler initialization from yt921x_chip_setup */
 	yt9215_smi_write(mdiodev, 0x220104, 0x50);
@@ -304,8 +307,9 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 		if (p > 4 && p != 8)
 			continue;
 		yt9215_smi_write(mdiodev, YT921X_PORT_LEARN_CTRL(p), 0x3b5ed1);
-		yt9215_smi_update_bits(mdiodev, YT921X_PORT_LEARN_DIS(p), 0x20000, 0x0);
-		yt9215_smi_update_bits(mdiodev, YT921X_PORT_VLAN_CTRL(p), 0x3ffc0, 1 << 6);
+		yt9215_smi_update_bits(mdiodev, YT921X_PORT_LEARN_DIS(p), 0x70007, 0x0);
+		yt9215_smi_update_bits(mdiodev, YT921X_PORT_VLAN_CTRL(p), 0x3ffc0,
+				       ((p == 3 || p == 4) ? 2 : 1) << 6);
 		yt9215_smi_update_bits(mdiodev, YT921X_STP_STATE_REG,
 				       0x3 << (p * 2), 0x3 << (p * 2));
 	}
