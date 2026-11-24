@@ -313,10 +313,6 @@
 	status = "okay";
 };
 
-&thermal_zones {
-	status = "okay";
-};
-
 &mdio0 {
 	status = "okay";
 
@@ -349,23 +345,27 @@
 	};
 };
 
-&ess_switch {
-	status = "okay";
-	cmnblk_clk = "internal_96MHz";
-	switch_mac_mode = <0xf>;
+&soc {
+	ess-instance {
+		ess-switch@39c00000 {
+			status = "okay";
+			cmnblk_clk = "internal_96MHz";
+			switch_mac_mode = <0xf>;
 
-	qcom,port_phyinfo {
-		port@0 {
-			port_id = <1>;
-			mdiobus = <&mdio0>;
-			phy_address = <7>;
-			phy_dac = <0x10 0x10>;
-		};
+			qcom,port_phyinfo {
+				port@0 {
+					port_id = <1>;
+					mdiobus = <&mdio0>;
+					phy_address = <7>;
+					phy_dac = <0x10 0x10>;
+				};
 
-		port@1 {
-			port_id = <2>;
-			forced-speed = <1000>;
-			forced-duplex = <1>;
+				port@1 {
+					port_id = <2>;
+					forced-speed = <1000>;
+					forced-duplex = <1>;
+				};
+			};
 		};
 	};
 };
