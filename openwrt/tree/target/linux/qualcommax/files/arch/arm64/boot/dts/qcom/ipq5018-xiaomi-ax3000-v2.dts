@@ -81,6 +81,15 @@
 	};
 };
 
+&sleep_clk {
+	clock-frequency = <32000>;
+};
+
+&xo_board_clk {
+	clock-div = <4>;
+	clock-mult = <1>;
+};
+
 &blsp1_uart1 {
 	pinctrl-0 = <&uart0_pins>;
 	pinctrl-names = "default";
@@ -317,9 +326,6 @@
 	status = "okay";
 
 	ge_phy: ethernet-phy@7 {
-		compatible = "ethernet-phy-id004d.d0c0";
-		reg = <7>;
-		resets = <&gcc GCC_GEPHY_MDC_SW_ARES>;
 		qcom,dac-preset-short-cable;
 	};
 };
@@ -328,9 +334,6 @@
 	status = "okay";
 	pinctrl-0 = <&mdio1_pins &switch_reset_pins>;
 	pinctrl-names = "default";
-	reset-gpios = <&tlmm 39 GPIO_ACTIVE_LOW>;
-	reset-assert-us = <10000>;
-	reset-deassert-us = <50000>;
 
 	/*
 	 * Motorcomm YT9215 switch at SMI address 0x1d, initialized in Option B
@@ -342,6 +345,7 @@
 	switch@1d {
 		compatible = "motorcomm,yt9215-ra80v2";
 		reg = <0x1d>;
+		reset-gpios = <&tlmm 39 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -402,7 +406,6 @@
 &wifi {
 	status = "okay";
 	qcom,rproc = <&q6_wcss_pd1>;
-	qcom,userpd-subsys-name = "q6v5_wcss_userpd1";
 	qcom,ath11k-fw-memory-mode = <2>;
 	qcom,bdf-addr = <0x4c400000>;
 	qcom,ath11k-calibration-variant = "Xiaomi-AX3000-v2";

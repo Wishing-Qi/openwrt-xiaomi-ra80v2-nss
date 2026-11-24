@@ -224,7 +224,36 @@ jobs:
           make download -j8 V=s 2>&1 | grep -iE '^(Downloading|ERROR|.*failed)' || true
           find dl -size -1024c -type f -print -delete || true
 
-      - name: Build
+      - name: Restore prebuilt OpenWrt host tools and toolchain
+        id: cache-toolchain
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            openwrt/staging_dir/host
+            openwrt/staging_dir/toolchain-*
+          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v1
+
+      - name: Build or reuse host tools and toolchain
+        run: |
+          cd openwrt
+          if [ "${{ steps.cache-toolchain.outputs.cache-hit }}" = "true" ]; then
+            echo "Restored prebuilt tools & toolchain from cache, refreshing stamp mtimes..."
+            find staging_dir/host staging_dir/toolchain-* -name '.*' -exec touch {} + 2>/dev/null || true
+          else
+            echo "Building host tools and cross-toolchain..."
+            make -j$(nproc) tools/install toolchain/install
+          fi
+
+      - name: Save prebuilt OpenWrt host tools and toolchain
+        if: always() && steps.cache-toolchain.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            openwrt/staging_dir/host
+            openwrt/staging_dir/toolchain-*
+          key: toolchain-${{ env.OPENWRT_REF }}-qualcommax-ipq50xx-v1
+
+      - name: Build target firmware
         id: build
         run: |
           cd openwrt
@@ -253,7 +282,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           CUR_KEY="ccache-dl-${OPENWRT_REF}-${GITHUB_RUN_ID}"
-          gh cache list --limit 100 --json id,key --jq ".[] | select(.key != \"$CUR_KEY\") | .id" |
+          TC_KEY="toolchain-${OPENWRT_REF}-qualcommax-ipq50xx-v1"
+          gh cache list --limit 100 --json id,key --jq ".[] | select(.key != \"$CUR_KEY\" and .key != \"$TC_KEY\") | .id" |
             while read -r cid; do
               [ -n "$cid" ] && gh cache delete "$cid" || true
             done
