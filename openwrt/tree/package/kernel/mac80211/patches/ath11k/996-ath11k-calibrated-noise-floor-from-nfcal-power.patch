@@ -217,16 +217,9 @@ Signed-off-by: ra80v2-nss
  int ath11k_wmi_send_set_ap_ps_param_cmd(struct ath11k *ar, u8 *peer_addr,
  					struct ath11k_wmi_ap_ps_arg *params)
  {
-@@ -8816,6 +8994,16 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
+@@ -8816,6 +8994,9 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  	case WMI_PDEV_BSS_CHAN_INFO_EVENTID:
  		ath11k_wmi_pdev_bss_chan_info_event(ab, skb);
-+		{
-+			u8 i;
-+
-+			for (i = 0; i < ab->num_radios; i++)
-+				if (ab->pdevs[i].ar)
-+					ath11k_wmi_sync_nfcal_survey(ab->pdevs[i].ar);
-+		}
  		break;
 +	case WMI_PDEV_GET_NFCAL_POWER_EVENTID:
 +		ath11k_wmi_pdev_nfcal_power_event(ab, skb);
