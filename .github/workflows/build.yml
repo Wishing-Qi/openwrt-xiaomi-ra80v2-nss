@@ -26,6 +26,9 @@ on:
 env:
   OPENWRT_REF: ${{ github.event.inputs.openwrt_ref || 'v25.12.5' }}
   TZ: Asia/Shanghai
+  CCACHE_DIR: ${{ github.workspace }}/openwrt/.ccache
+  CCACHE_MAXSIZE: 2G
+  CCACHE_COMPRESS: 1
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
@@ -61,19 +64,6 @@ jobs:
             unzip zlib1g-dev file wget zstd libelf-dev \
             u-boot-tools device-tree-compiler
           sudo timedatectl set-timezone "$TZ" || true
-          ccache -M 2G
-          ccache -o compression=true
-          ccache -z
-
-      - name: Restore ccache and dl cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.ccache
-            openwrt/dl
-          key: ccache-dl-${{ env.OPENWRT_REF }}-${{ github.run_id }}
-          restore-keys: |
-            ccache-dl-${{ env.OPENWRT_REF }}-
 
       - name: Checkout OpenWrt ${{ env.OPENWRT_REF }}
         uses: actions/checkout@v4
@@ -82,6 +72,23 @@ jobs:
           ref: ${{ env.OPENWRT_REF }}
           path: openwrt
           fetch-depth: 0
+
+      - name: Restore ccache and dl cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            openwrt/.ccache
+            openwrt/dl
+          key: ccache-dl-${{ env.OPENWRT_REF }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-dl-${{ env.OPENWRT_REF }}-
+
+      - name: Initialize ccache limits and reset stats
+        run: |
+          ccache -M 2G
+          ccache -o compression=true
+          ccache -z
+          ccache -s
 
       - name: Prepare the tree
         run: |
@@ -232,9 +239,13 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            ~/.ccache
+            openwrt/.ccache
             openwrt/dl
           key: ccache-dl-${{ env.OPENWRT_REF }}-${{ github.run_id }}
+
+      - name: Show ccache hit statistics
+        if: always()
+        run: ccache -s || true
 
       - name: Prune old caches to stay well under 10GB limit
         if: always()
