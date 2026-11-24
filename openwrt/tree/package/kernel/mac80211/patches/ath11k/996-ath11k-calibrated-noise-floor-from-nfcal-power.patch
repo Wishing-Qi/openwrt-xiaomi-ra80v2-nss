@@ -233,7 +233,7 @@ Signed-off-by: ra80v2-nss
  	unsigned long timeout, time_left;
  	int ret;
  
-+	if (time_after(jiffies, ar->nfcal_last_update + 10 * HZ)) {
++	if (ar->chan_tx_pwr > 0 && time_after(jiffies, ar->nfcal_last_update + 10 * HZ)) {
 +		ar->nfcal_last_update = jiffies;
 +		ath11k_wmi_pdev_get_nfcal_power(ar);
 +	}

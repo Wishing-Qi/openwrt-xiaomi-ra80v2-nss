@@ -368,6 +368,7 @@
 
 				port@1 {
 					port_id = <2>;
+					phy_address = <0>;
 					forced-speed = <1000>;
 					forced-duplex = <1>;
 				};
