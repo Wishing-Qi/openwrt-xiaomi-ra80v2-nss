@@ -17,8 +17,8 @@
 
 	aliases {
 		serial0 = &blsp1_uart1;
-		ethernet0 = &dp2;
-		ethernet1 = &dp1;
+		ethernet0 = &dp1;
+		ethernet1 = &dp2;
 		led-boot = &led_status_orange;
 		led-failsafe = &led_status_orange;
 		led-running = &led_status_blue;
@@ -341,8 +341,8 @@
 	/*
 	 * Motorcomm YT9215 switch at SMI address 0x1d, initialized in Option B
 	 * Dual-Conduit Untagged Raw Ethernet mode by yt9215-ra80v2:
-	 *   - Port 3 (WAN)      <---> Port 4 (Internal PHY -> dp1 / eth1)
-	 *   - Port 0, 1, 2 (LAN)<---> Port 8 (Rev-SGMII 1000M -> dp2 / eth0)
+	 *   - Port 3 (WAN)      <---> Port 4 (Internal PHY -> dp1 / eth0)
+	 *   - Port 0, 1, 2 (LAN)<---> Port 8 (SGMII 1000M  -> dp2 / eth1)
 	 *   - CPU tag (0x9988) disabled so NSS offloads standard Ethernet frames.
 	 */
 	ethernet-switch@1d {
@@ -377,20 +377,20 @@
 	};
 };
 
-/* GMAC0 -> Internal GE PHY -> YT9215 Port 4 -> Rear WAN (Port 3) [eth1] */
+/* GMAC0 -> Internal GE PHY -> YT9215 Port 4 -> Rear WAN (Port 3) [eth0] */
 &dp1 {
 	status = "okay";
-	label = "eth1";
+	label = "eth0";
 	phy-mode = "internal";
 	phy-handle = <&ge_phy>;
 	nvmem-cells = <&macaddr_art_0>;
 	nvmem-cell-names = "mac-address";
 };
 
-/* GMAC1 -> Uniphy SGMII -> YT9215 Port 8 -> Rear LAN 1..3 (Port 0..2) [eth0] */
+/* GMAC1 -> Uniphy SGMII -> YT9215 Port 8 -> Rear LAN 1..3 (Port 0..2) [eth1] */
 &dp2 {
 	status = "okay";
-	label = "eth0";
+	label = "eth1";
 	phy-mode = "sgmii";
 	nvmem-cells = <&macaddr_art_6>;
 	nvmem-cell-names = "mac-address";

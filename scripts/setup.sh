@@ -62,8 +62,8 @@ LEDS_SH="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/board.d/01_leds"
 if ! grep -q 'xiaomi,ax3000-v2)' "$LEDS_SH"; then
     sed -i '/case "\$board" in/a \
 xiaomi,ax3000-v2)\
-\tucidef_set_led_netdev "wan-blue" "WAN-BLUE" "blue:wan" "eth1" "tx rx link_1000"\
-\tucidef_set_led_netdev "wan-orange" "WAN-ORANGE" "orange:wan" "eth1" "link_10 link_100"\
+\tucidef_set_led_netdev "wan-blue" "WAN-BLUE" "blue:wan" "eth0" "tx rx link_1000"\
+\tucidef_set_led_netdev "wan-orange" "WAN-ORANGE" "orange:wan" "eth0" "link_10 link_100"\
 \t;;' "$LEDS_SH"
 fi
 
@@ -72,9 +72,9 @@ if ! grep -q 'xiaomi,ax3000-v2)' "$NET_SH"; then
     sed -i '/case \$board in/a \
 \txiaomi,ax3000-v2)\
 \t\t# Option B Dual-Conduit Untagged Raw Ethernet on Motorcomm YT9215:\
-\t\t#   dp2 (eth0) <- Port 8 (SGMII) <- LAN 1..3 (Port 0..2)\
-\t\t#   dp1 (eth1) <- Port 4 (GE PHY) <- WAN (Port 3)\
-\t\tucidef_set_interfaces_lan_wan "eth0" "eth1"\
+\t\t#   dp1 (eth0) <- Port 4 (GE PHY) <- WAN (Port 3)\
+\t\t#   dp2 (eth1) <- Port 8 (SGMII)  <- LAN 1..3 (Port 0..2)\
+\t\tucidef_set_interfaces_lan_wan "eth1" "eth0"\
 \t\t;;' "$NET_SH"
 fi
 

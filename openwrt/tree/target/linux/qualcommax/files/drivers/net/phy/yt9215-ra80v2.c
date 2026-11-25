@@ -7,8 +7,8 @@
  * qca-nss-ecm) can offload 100% of wired WAN <-> LAN and Wi-Fi traffic without
  * proprietary 0x9988 DSA tags:
  *
- *   - Rear WAN (Port 3)       <---> Internal PHY Port 4 (dp1 / eth1)
- *   - Rear LAN 1..3 (Port 0..2)<---> SGMII Port 8 (dp2 / eth0, Rev-SGMII 1000M)
+ *   - Rear WAN (Port 3)       <---> Internal PHY Port 4 (dp1 / eth0)
+ *   - Rear LAN 1..3 (Port 0..2)<---> SGMII Port 8 (dp2 / eth1, SGMII 1000M)
  */
 
 #include <linux/debugfs.h>
@@ -17,9 +17,11 @@
 #include <linux/kernel.h>
 #include <linux/mdio.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/phy.h>
 #include <linux/seq_file.h>
+#include <linux/workqueue.h>
 
 #define YT9215_SWITCH_ID		0x0
 #define YT9215_REG_ADDR_HI_LO		((YT9215_SWITCH_ID << 2) | 0x0)
@@ -153,45 +155,93 @@ static int yt9215_smi_wait(struct mdio_device *mdiodev, u32 reg, u32 mask, u32 e
 	return -ETIMEDOUT;
 }
 
+static DEFINE_MUTEX(yt9215_mbus_lock);
+
 static int yt9215_int_phy_read(struct mdio_device *mdiodev, int phy, int reg, u16 *val)
 {
 	u32 ctrl, din = 0;
 	int ret;
 
+	mutex_lock(&yt9215_mbus_lock);
 	yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
 	ctrl = ((phy & 0x1f) << 21) | ((reg & 0x1f) << 16) | 0x8;
 	yt9215_smi_update_bits(mdiodev, YT921X_INT_MBUS_ADDR, 0x03fff00c, ctrl);
 	yt9215_smi_write(mdiodev, YT921X_INT_MBUS_OP, 1);
 	ret = yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
 	if (ret)
-		return ret;
+		goto out;
 	ret = yt9215_smi_read(mdiodev, YT921X_INT_MBUS_DIN, &din);
 	if (ret)
-		return ret;
+		goto out;
 	*val = (u16)(din & 0xffff);
-	return 0;
+out:
+	mutex_unlock(&yt9215_mbus_lock);
+	return ret;
 }
 
 static int yt9215_int_phy_write(struct mdio_device *mdiodev, int phy, int reg, u16 val)
 {
 	u32 ctrl;
 
+	mutex_lock(&yt9215_mbus_lock);
 	yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
 	ctrl = ((phy & 0x1f) << 21) | ((reg & 0x1f) << 16) | 0x4;
 	yt9215_smi_update_bits(mdiodev, YT921X_INT_MBUS_ADDR, 0x03fff00c, ctrl);
 	yt9215_smi_write(mdiodev, YT921X_INT_MBUS_DOUT, val);
 	yt9215_smi_write(mdiodev, YT921X_INT_MBUS_OP, 1);
 	yt9215_smi_wait(mdiodev, YT921X_INT_MBUS_OP, 1, 0);
+	mutex_unlock(&yt9215_mbus_lock);
 	return 0;
 }
 
 static struct mdio_device *yt9215_dbg_mdiodev;
 static u32 yt9215_dbg_last_reg = YT921X_CHIP_ID_REG;
+static struct delayed_work yt9215_wan_poll_dwork;
+static int yt9215_wan_last_link = -1;
+
+/* Mirror physical Rear WAN (Port 3) link status onto Internal PHY Port 4
+ * (connected to IPQ5018 dp1 / eth0) so Linux netifd sees real carrier
+ * transitions when the WAN cable is plugged or unplugged.
+ */
+static void yt9215_wan_poll_work(struct work_struct *work)
+{
+	struct mdio_device *mdiodev = yt9215_dbg_mdiodev;
+	u16 physr = 0;
+	int link_up;
+
+	if (!mdiodev)
+		return;
+
+	if (yt9215_int_phy_read(mdiodev, 3, 0x11, &physr) == 0) {
+		link_up = !!(physr & BIT(10));
+		if (link_up != yt9215_wan_last_link) {
+			yt9215_wan_last_link = link_up;
+			if (link_up)
+				yt9215_int_phy_write(mdiodev, 4, MII_BMCR,
+						     BMCR_ANENABLE | BMCR_ANRESTART |
+						     BMCR_FULLDPLX | BMCR_SPEED1000);
+			else
+				yt9215_int_phy_write(mdiodev, 4, MII_BMCR,
+						     BMCR_PDOWN | BMCR_ANENABLE |
+						     BMCR_FULLDPLX | BMCR_SPEED1000);
+		}
+	}
+
+	schedule_delayed_work(&yt9215_wan_poll_dwork, msecs_to_jiffies(2000));
+}
 
 static int yt9215_dbg_show(struct seq_file *s, void *v)
 {
 	struct mdio_device *mdiodev = yt9215_dbg_mdiodev;
 	static const int ports[] = { 0, 1, 2, 3, 4, 8 };
+	static const char * const port_names[] = {
+		[0] = "LAN1",
+		[1] = "LAN2",
+		[2] = "LAN3",
+		[3] = "WAN ",
+		[4] = "CPU_WAN(eth0)",
+		[8] = "CPU_LAN(eth1)",
+	};
 	u32 val = 0;
 	int i;
 
@@ -245,9 +295,9 @@ static int yt9215_dbg_show(struct seq_file *s, void *v)
 			yt9215_int_phy_read(mdiodev, p, 0x11, &physr);
 		}
 		seq_printf(s,
-			   "Port %d: CTRL=0x%08x SGMII=0x%08x MAC_EN=0x%08x XMII=0x%08x ISO=0x%03x LRN_DIS=0x%08x VLAN=0x%08x PHY_BMSR=0x%04x PHY_SR=0x%04x\n"
+			   "Port %d [%s]: CTRL=0x%08x SGMII=0x%08x MAC_EN=0x%08x XMII=0x%08x ISO=0x%03x LRN_DIS=0x%08x VLAN=0x%08x PHY_BMSR=0x%04x PHY_SR=0x%04x\n"
 			   "        MIB Rx(B=%u M=%u U=%u Bytes=%u Drop=%u) Tx(B=%u M=%u U=%u Bytes=%u)\n",
-			   p, pctrl, sgmii, macen, xmii, iso & 0x7ff, lrn, pvid, bmsr, physr,
+			   p, port_names[p], pctrl, sgmii, macen, xmii, iso & 0x7ff, lrn, pvid, bmsr, physr,
 			   rxb, rxm, rxu, rxbytes, rxdrop, txb, txm, txu, txbytes);
 	}
 	return 0;
@@ -506,7 +556,7 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	}
 	yt9215_smi_update_bits(mdiodev, 0x8002c, 0x11fff, 0x11fff);
 
-	for (p = 0; p <= 4; p++) {
+	for (p = 0; p <= 3; p++) {
 		yt9215_int_phy_write(mdiodev, p, MII_BMCR,
 				     BMCR_ANENABLE | BMCR_ANRESTART | BMCR_FULLDPLX | BMCR_SPEED1000);
 		usleep_range(2000, 3000);
@@ -515,8 +565,11 @@ static int yt9215_ra80v2_probe(struct mdio_device *mdiodev)
 	yt9215_dbg_mdiodev = mdiodev;
 	debugfs_create_file("yt9215_regs", 0600, NULL, mdiodev, &yt9215_dbg_fops);
 
+	INIT_DELAYED_WORK(&yt9215_wan_poll_dwork, yt9215_wan_poll_work);
+	schedule_delayed_work(&yt9215_wan_poll_dwork, msecs_to_jiffies(500));
+
 	dev_info(&mdiodev->dev,
-		 "YT9215 Option B initialized (chip_id=0x%08x): WAN(P3<->P4/eth1) LAN(P0..2<->P8/eth0) untagged\n",
+		 "YT9215 Option B initialized (chip_id=0x%08x): WAN(P3<->P4/eth0) LAN(P0..2<->P8/eth1) untagged\n",
 		 chip_id);
 	return 0;
 }
