@@ -181,6 +181,7 @@ jobs:
           CONFIG_PACKAGE_luci-i18n-autoreboot-zh-cn=y
           CONFIG_PACKAGE_luci-app-ramfree=y
           CONFIG_PACKAGE_luci-i18n-ramfree-zh-cn=y
+          CONFIG_DEVEL=y
           CONFIG_CCACHE=y
           EOF
           make defconfig
@@ -191,6 +192,7 @@ jobs:
           missing=0
           for sym in \
             CONFIG_TARGET_qualcommax_ipq50xx_DEVICE_xiaomi_ax3000-v2 \
+            CONFIG_CCACHE \
             CONFIG_PACKAGE_ipq-wifi-xiaomi_ax3000-v2 \
             CONFIG_PACKAGE_kmod-qca-nss-drv \
             CONFIG_PACKAGE_kmod-qca-nss-ecm \
@@ -252,6 +254,10 @@ jobs:
             find staging_dir/host staging_dir/toolchain-* build_dir/host build_dir/toolchain-* \
               \( -name '.installed*' -o -path '*/stamp/*' -o -name '.*_installed*' -o -name '.*_compile*' \) \
               -exec touch {} + 2>/dev/null || true
+            if [ ! -x staging_dir/host/bin/ccache_cc ]; then
+              echo "Installing OpenWrt ccache wrapper scripts into restored staging_dir..."
+              make tools/ccache/clean tools/ccache/compile V=s
+            fi
           else
             echo "Building host tools and cross-toolchain..."
             make -j$(nproc) tools/install toolchain/install
