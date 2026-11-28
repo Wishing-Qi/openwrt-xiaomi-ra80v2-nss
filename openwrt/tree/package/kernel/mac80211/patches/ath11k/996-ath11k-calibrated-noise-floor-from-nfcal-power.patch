@@ -2,11 +2,11 @@ From: ra80v2-nss project
 Subject: [PATCH] wifi: ath11k: query calibrated noise floor via WMI_PDEV_GET_NFCAL_POWER
 
 On QCN6122 (5 GHz) and IPQ5018, WMI_PDEV_BSS_CHAN_INFO_EVENTID reports an
-uncalibrated raw noise floor (around -116 dBm on QCN6122) once the radio
-enters AP mode. Query WMI_PDEV_GET_NFCAL_POWER_CMDID (0x401a, rate-limited
-to once every 10 seconds during survey / fw_stats requests) and parse
-WMI_PDEV_GET_NFCAL_POWER_EVENTID (0x400f) to populate ar->survey[].noise
-with the firmware-calibrated noise floor.
+uncalibrated raw noise floor (around -106 to -116 dBm on QCN6122) once the
+radio enters AP mode. Query WMI_PDEV_GET_NFCAL_POWER_CMDID (0x401a,
+rate-limited to once every 10 seconds during survey / fw_stats requests) and
+parse WMI_PDEV_GET_NFCAL_POWER_EVENTID (0x400f) to populate survey->noise
+with the firmware-calibrated noise floor for the matching channel frequency.
 
 Signed-off-by: ra80v2-nss
 ---
@@ -23,16 +23,56 @@ Signed-off-by: ra80v2-nss
  	struct completion bss_survey_done;
  
  	struct work_struct regd_update_work;
-@@ -1392,4 +1396,6 @@ void ath11k_nss_dp_ready(struct ath11k_base *ab);
+@@ -1392,4 +1396,46 @@ void ath11k_nss_dp_ready(struct ath11k_base *ab);
  void ath11k_nss_vif_event(struct ath11k *ar, struct ieee80211_vif *vif,
  			  bool add);
  
 +int ath11k_wmi_pdev_get_nfcal_power(struct ath11k *ar);
 +
++static inline int ath11k_nfcal_bss_chan_info_type(struct ath11k *ar)
++{
++	if (ar->chan_tx_pwr > 0 &&
++	    time_after(jiffies, ar->nfcal_last_update + 10 * HZ)) {
++		ar->nfcal_last_update = jiffies;
++		ath11k_wmi_pdev_get_nfcal_power(ar);
++	}
++	return 1;
++}
++#define WMI_BSS_CHAN_INFO_READ_CLEAR ath11k_nfcal_bss_chan_info_type(ar)
++
++static inline u32 ath11k_nfcal_survey_in_use(struct ath11k *ar,
++					     struct survey_info *survey)
++{
++	if (ar->chan_tx_pwr > 0 &&
++	    time_after(jiffies, ar->nfcal_last_update + 10 * HZ)) {
++		ar->nfcal_last_update = jiffies;
++		ath11k_wmi_pdev_get_nfcal_power(ar);
++	}
++	if (ar->nfcal_count && survey->channel) {
++		u32 freq = survey->channel->center_freq;
++		u32 best_diff = U32_MAX;
++		u8 best = 0;
++		u8 i;
++
++		for (i = 0; i < ar->nfcal_count; i++) {
++			u32 diff = abs((s32)ar->nfcal_freq[i] - (s32)freq);
++			if (diff < best_diff) {
++				best_diff = diff;
++				best = i;
++			}
++		}
++		survey->noise = (s8)ar->nfcal_power[best];
++		return (1 << 1) | SURVEY_INFO_NOISE_DBM;
++	}
++	return (1 << 1);
++}
++#undef SURVEY_INFO_IN_USE
++#define SURVEY_INFO_IN_USE ath11k_nfcal_survey_in_use(ar, survey)
++
  #endif /* _CORE_H_ */
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -1479,6 +1479,184 @@ int ath11k_wmi_pdev_bss_chan_info_request(struct ath11k *ar,
+@@ -1479,6 +1479,190 @@ int ath11k_wmi_pdev_bss_chan_info_request(struct ath11k *ar,
  	return ret;
  }
  
@@ -40,9 +80,10 @@ Signed-off-by: ra80v2-nss
 +#define WMI_PDEV_GET_NFCAL_POWER_EVENTID	(WMI_TLV_CMD(WMI_GRP_PDEV) + 0x0f)
 +#define WMI_TAG_PDEV_GET_NFCAL_POWER_CMD	0x2d0
 +#define WMI_TAG_PDEV_GET_NFCAL_POWER_EVENT	0x1db
-+#define WMI_TAG_NFCAL_POWER_ITEM		0x1eb
-+#define WMI_TAG_NFCAL_FREQ_ITEM			0x1ec
-+#define WMI_TAG_NFCAL_VALID_ITEM		0x1ed
++#define WMI_TAG_NFCAL_ARRAY_STRUCT		0x12
++#define WMI_TAG_NFCAL_UNCOMP_POWER_ITEM		0x1eb
++#define WMI_TAG_NFCAL_POWER_ITEM		0x1ec
++#define WMI_TAG_NFCAL_FREQ_ITEM			0x1ed
 +
 +struct wmi_pdev_get_nfcal_power_cmd {
 +	u32 tlv_header;
@@ -88,12 +129,12 @@ Signed-off-by: ra80v2-nss
 +
 +struct wmi_nfcal_power_parse {
 +	const struct wmi_pdev_nfcal_power_ev_fixed_param *fixed_param;
-+	u32 nf_cal_power[ATH11K_NFCAL_MAX_ENTRIES];
++	u32 nf_uncomp_power[ATH11K_NFCAL_MAX_ENTRIES];
++	s32 nf_cal_power[ATH11K_NFCAL_MAX_ENTRIES];
 +	u32 nf_cal_freq[ATH11K_NFCAL_MAX_ENTRIES];
-+	u32 nf_cal_valid[ATH11K_NFCAL_MAX_ENTRIES];
++	u16 num_uncomp;
 +	u16 num_power;
 +	u16 num_freq;
-+	u16 num_valid;
 +};
 +
 +static int ath11k_wmi_tlv_iter(struct ath11k_base *ab, const void *ptr,
@@ -116,26 +157,26 @@ Signed-off-by: ra80v2-nss
 +			return -EPROTO;
 +		tb->fixed_param = ptr;
 +		break;
-+	case WMI_TAG_ARRAY_UINT32:
++	case WMI_TAG_NFCAL_ARRAY_STRUCT:
 +		if (len < 8)
-+			return -EPROTO;
++			return 0;
 +		end = p + 8 + ((len - 8) & ~7U);
 +		for (; p < end; p += 8) {
 +			u16 item_tag = le16_to_cpup((const __le16 *)(p + 2));
 +			u32 val = le32_to_cpup((const __le32 *)(p + 4));
 +
 +			switch (item_tag) {
++			case WMI_TAG_NFCAL_UNCOMP_POWER_ITEM:
++				if (tb->num_uncomp < ATH11K_NFCAL_MAX_ENTRIES)
++					tb->nf_uncomp_power[tb->num_uncomp++] = val;
++				break;
 +			case WMI_TAG_NFCAL_POWER_ITEM:
 +				if (tb->num_power < ATH11K_NFCAL_MAX_ENTRIES)
-+					tb->nf_cal_power[tb->num_power++] = val;
++					tb->nf_cal_power[tb->num_power++] = (s32)val;
 +				break;
 +			case WMI_TAG_NFCAL_FREQ_ITEM:
 +				if (tb->num_freq < ATH11K_NFCAL_MAX_ENTRIES)
 +					tb->nf_cal_freq[tb->num_freq++] = val;
-+				break;
-+			case WMI_TAG_NFCAL_VALID_ITEM:
-+				if (tb->num_valid < ATH11K_NFCAL_MAX_ENTRIES)
-+					tb->nf_cal_valid[tb->num_valid++] = val;
 +				break;
 +			}
 +		}
@@ -166,7 +207,7 @@ Signed-off-by: ra80v2-nss
 +	struct wmi_nfcal_power_parse *tb;
 +	struct ath11k *ar;
 +	u8 count = 0;
-+	u16 i, n;
++	u16 i;
 +	int ret;
 +
 +	tb = kzalloc(sizeof(*tb), GFP_ATOMIC);
@@ -189,12 +230,17 @@ Signed-off-by: ra80v2-nss
 +	if (!ar)
 +		goto exit;
 +
-+	n = min3(tb->num_power, tb->num_freq, tb->num_valid);
-+	for (i = 0; i < n && count < ARRAY_SIZE(ar->nfcal_freq); i++) {
-+		if (!tb->nf_cal_valid[i] || !tb->nf_cal_power[i])
++	for (i = 0; i < tb->num_freq && count < ARRAY_SIZE(ar->nfcal_freq); i++) {
++		u32 freq = tb->nf_cal_freq[i];
++		s32 power;
++
++		if (!freq || (u32)i * 2 >= tb->num_power)
 +			continue;
-+		ar->nfcal_freq[count] = tb->nf_cal_freq[i];
-+		ar->nfcal_power[count] = (s32)tb->nf_cal_power[i];
++		power = tb->nf_cal_power[i * 2];
++		if (!power)
++			continue;
++		ar->nfcal_freq[count] = freq;
++		ar->nfcal_power[count] = power;
 +		count++;
 +	}
 +
@@ -217,7 +263,7 @@ Signed-off-by: ra80v2-nss
  int ath11k_wmi_send_set_ap_ps_param_cmd(struct ath11k *ar, u8 *peer_addr,
  					struct ath11k_wmi_ap_ps_arg *params)
  {
-@@ -8816,6 +8994,9 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
+@@ -8816,6 +9000,9 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  	case WMI_PDEV_BSS_CHAN_INFO_EVENTID:
  		ath11k_wmi_pdev_bss_chan_info_event(ab, skb);
  		break;

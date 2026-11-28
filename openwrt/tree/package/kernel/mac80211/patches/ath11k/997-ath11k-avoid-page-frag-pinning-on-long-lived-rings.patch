@@ -1,0 +1,43 @@
+From: ra80v2-nss project
+Subject: [PATCH] wifi: ath11k: back ring skbs with alloc_skb to prevent 32KB page-frag pinning
+
+ath11k's RXDMA monitor/status refill rings (ath11k_dp_rxbufs_replenish), Copy
+Engine Rx rings (ath11k_ce_rx_post_pipe), and direct buffer rings allocate
+long-lived ring buffers via dev_alloc_skb(), which carves ~2 KB fragments out
+of the kernel's shared per-CPU 32 KB (order-3) page_frag_cache.
+
+Under sustained traffic, long-lived ring buffers interleave with short-lived
+traffic skbs inside the same 32 KB compound pages. A single unreleased ring
+buffer pins its entire 32 KB physical page even after all neighbouring traffic
+skbs are freed, causing 5x-10x RAM amplification and eventual OOM reboots on
+256 MB IPQ5018 boards (see eisbaw/ath11k-page-frag-fix and qca-nss-drv patch
+0105).
+
+Redirect dev_alloc_skb() inside ath11k to alloc_skb(len + NET_SKB_PAD,
+GFP_ATOMIC) + skb_reserve(skb, NET_SKB_PAD), preserving identical headroom and
+alignment semantics while backing each ring buffer with an independent slab
+object that returns memory immediately upon free.
+
+Signed-off-by: ra80v2-nss
+---
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -1438,4 +1438,18 @@ static inline u32 ath11k_nfcal_survey_in_use(struct ath11k *ar,
+ #undef SURVEY_INFO_IN_USE
+ #define SURVEY_INFO_IN_USE ath11k_nfcal_survey_in_use(ar, survey)
+ 
++#include <linux/skbuff.h>
++
++static inline struct sk_buff *ath11k_alloc_ring_skb(unsigned int length)
++{
++	struct sk_buff *skb = alloc_skb(length + NET_SKB_PAD, GFP_ATOMIC);
++
++	if (likely(skb))
++		skb_reserve(skb, NET_SKB_PAD);
++	return skb;
++}
++
++#undef dev_alloc_skb
++#define dev_alloc_skb(len) ath11k_alloc_ring_skb(len)
++
+ #endif /* _CORE_H_ */

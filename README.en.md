@@ -103,6 +103,7 @@ For the complete official Motorcomm YT9215 register and bitfield database (extra
 | 2.4 GHz Wi-Fi | `Xiaomi-AX3000-2.4G-XXXX` | Open / no encryption (`encryption 'none'`), `HE40`, country `CN` |
 | 5 GHz Wi-Fi | `Xiaomi-AX3000-5G-XXXX` | Open / no encryption (`encryption 'none'`), Channel 36 **`HE160` (160 MHz)** |
 | LuCI Language | Simplified Chinese (`zh_cn`) | Can be switched to English under System → Language and Style |
+| ZRAM Swap | `86 MB` (`zstd` compression) | Configured automatically on first boot via `99-ra80v2-nss` |
 
 > `XXXX` is the last two bytes of the device's MAC address (uppercase), set on first boot by `/etc/uci-defaults/97-pzl8-wifi-ssid`.
 >

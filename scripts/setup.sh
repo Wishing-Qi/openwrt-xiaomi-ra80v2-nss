@@ -52,7 +52,7 @@ define Device/xiaomi_ax3000-v2
 	DEVICE_DTS := ipq5018-xiaomi-ax3000-v2
 	DEVICE_DTS_CONFIG := config@mp03.3
 	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-xiaomi_ax3000-v2 \
-		uboot-envtools zram-swap kmod-mtd-rw
+		uboot-envtools zram-swap kmod-lib-zstd kmod-mtd-rw
 endef
 TARGET_DEVICES += xiaomi_ax3000-v2
 EOF
@@ -181,6 +181,38 @@ say "Adding patches to packages from other feeds"
       echo "  feeds/${f#./}"
   done )
 
+LUCI_NET_JS="$OW/feeds/luci/modules/luci-base/htdocs/luci-static/resources/network.js"
+if [ -f "$LUCI_NET_JS" ] && ! grep -q '_state.bridges\[d\]' "$LUCI_NET_JS"; then
+    python3 -c '
+import pathlib, re
+p = pathlib.Path("'"$LUCI_NET_JS"'")
+t = p.read_text()
+old = """\tcontainsDevice: function(ifname) {
+\t\tif (this.isVirtual())
+\t\t\treturn (this.getProtocol() + '\''-'\'' + this.sid == ifname);
+\t\telse if (this.isBridge())
+\t\t\treturn (L.toArray(uci.get('\''network'\'', this.sid, '\''ifname'\'')).indexOf(ifname) > -1);
+\t\telse
+\t\t\treturn (uci.get('\''network'\'', this.sid, '\''ifname'\'') == ifname || uci.get('\''network'\'', this.sid, '\''device'\'') == ifname);
+\t},"""
+new = """\tcontainsDevice: function(ifname) {
+\t\tif (this.isVirtual())
+\t\t\treturn (this.getProtocol() + '\''-'\'' + this.sid == ifname);
+\t\telse if (this.isBridge())
+\t\t\treturn (L.toArray(uci.get('\''network'\'', this.sid, '\''ifname'\'')).indexOf(ifname) > -1);
+\t\tvar d = uci.get('\''network'\'', this.sid, '\''device'\'') || uci.get('\''network'\'', this.sid, '\''ifname'\'');
+\t\tif (d == ifname)
+\t\t\treturn true;
+\t\tif (d && _state.bridges[d] && Array.isArray(_state.bridges[d].ifnames) && _state.bridges[d].ifnames.indexOf(ifname) > -1)
+\t\t\treturn true;
+\t\treturn false;
+\t},"""
+if old in t:
+    p.write_text(t.replace(old, new, 1))
+    print("  patched luci-base network.js: bridge member ports inherit parent interface label (e.g. eth1 -> (lan))")
+'
+fi
+
 # ---------------------------------------------------------------- 6. rootfs overlay
 say "Installing the rootfs overlay"
 mkdir -p "$OW/files"
@@ -189,6 +221,7 @@ if [ -f "$OW/files/usr/lib/lua/luci/i18n/pzl8.zh-cn.lmo" ] && [ ! -f "$OW/files/
     mv "$OW/files/usr/lib/lua/luci/i18n/pzl8.zh-cn.lmo" "$OW/files/usr/lib/lua/luci/i18n/ra80v2.zh-cn.lmo"
 fi
 find "$OW/files" -name '*pzl8*' -delete 2>/dev/null || true
+rm -f "$OW/files/etc/init.d/ra80v2-diag-log" "$OW/files/lib/preinit/95_ra80v2_diag_dump" 2>/dev/null || true
 find "$OW/files" -type f | sed "s|$OW/|  |"
 chmod +x "$OW"/files/etc/init.d/* 2>/dev/null || true
 chmod +x "$OW"/files/usr/libexec/rpcd/* 2>/dev/null || true

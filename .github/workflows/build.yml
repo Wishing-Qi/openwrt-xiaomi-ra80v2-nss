@@ -133,7 +133,6 @@ jobs:
 
           cp -a vantage/luci-theme-vantage openwrt/feeds/luci/themes/
           cp -a vantage/luci-app-vantage openwrt/feeds/luci/applications/
-          cp -a vantage/luci-app-vantage-traffic openwrt/feeds/luci/applications/
 
           mkdir -p openwrt/files/etc/apk/keys
           wget -qO openwrt/files/etc/apk/keys/vantage-signing.pem \
@@ -166,10 +165,8 @@ jobs:
           cat >> .config << 'EOF'
           CONFIG_PACKAGE_luci-theme-vantage=y
           CONFIG_PACKAGE_luci-app-vantage=y
-          CONFIG_PACKAGE_luci-app-vantage-traffic=y
           CONFIG_PACKAGE_luci-i18n-vantage-theme-zh-cn=y
           CONFIG_PACKAGE_luci-i18n-vantage-zh-cn=y
-          CONFIG_PACKAGE_luci-i18n-vantage-traffic-zh-cn=y
           CONFIG_PACKAGE_luci-app-upnp=y
           CONFIG_PACKAGE_luci-i18n-upnp-zh-cn=y
           CONFIG_PACKAGE_luci-app-ttyd=y
@@ -202,13 +199,14 @@ jobs:
             CONFIG_PACKAGE_nss-firmware-ipq50xx \
             CONFIG_NSS_DRV_WIFIOFFLOAD_ENABLE \
             CONFIG_NSS_FIRMWARE_VERSION_12_5 \
+            CONFIG_NSS_MEM_PROFILE_MEDIUM \
             CONFIG_PACKAGE_zram-swap \
+            CONFIG_PACKAGE_kmod-lib-zstd \
             CONFIG_PACKAGE_kmod-mtd-rw \
             CONFIG_LUCI_LANG_zh_Hans \
             CONFIG_PACKAGE_luci-i18n-base-zh-cn \
             CONFIG_PACKAGE_luci-theme-vantage \
             CONFIG_PACKAGE_luci-app-vantage \
-            CONFIG_PACKAGE_luci-app-vantage-traffic \
             CONFIG_PACKAGE_luci-app-upnp \
             CONFIG_PACKAGE_luci-app-ttyd \
             CONFIG_PACKAGE_luci-app-cpufreq \

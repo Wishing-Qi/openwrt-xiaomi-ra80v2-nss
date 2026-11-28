@@ -25,26 +25,13 @@ STOP=10
 FLAG=/etc/nss-boot-pending
 DISABLED=/etc/nss-disabled
 PBUF_EXTRA=800000        # vendor MP_256 value; 256 MB board
-# The vendor's value, and nwrt's.  This was 4096 for a while, matched to
-# PBUF_EMPTY_POOL below on the reasoning that the firmware grows the pool
-# towards the high water mark, so a mark above the cap undoes the cap.  That is
-# real and measurable - 28.5 MB free against 35.3, about 7 MB.
-#
-# Restored anyway.  Reference images measured on 256 MB IPQ5018 boards run
-# 16336 against a 4096 pool: QSDK 4.4 and 5.4.  Two independent builds pay
-# the 7 MB deliberately; being the only one that does not is worth less than
-# the memory saved.
-PBUF_HIGH_WATER=16336
-
-# How many empty skbs the NSS core keeps pooled.  The driver derives this from
-# the compiled memory profile and this build is NSS_MEM_PROFILE_MEDIUM, which
-# leaves it at 8704 - measured at 10.1 MB more than the 4096 that
-# NSS_MEM_PROFILE_LOW caps it to (nss_core.c, NSS_LOW_MEM_EMPTY_POOL_BUF_SZ).
-#
-# Set here rather than by building the LOW profile, because LOW also cuts the
-# connection tables from 2048 to 512 per family, and the 10 MB is in the pool,
-# not the tables.  Verified under four rounds of saturating Wi-Fi: no
-# rx_desc_alloc_fail, no tx_enqueue_drop, no page-allocation failure.
+# Cap high_water to match PBUF_EMPTY_POOL (4096) on 256 MB boards.
+# With patch 0105 (alloc_skb -> kmalloc-4096 per buffer on kernel 6.12),
+# each buffer costs ~4.25 KB of unswappable kernel slab memory, and the NSS
+# firmware grows its custody pool towards high_water under traffic load and
+# never returns those buffers to Linux. Keeping high_water at 4096 saves
+# ~7-15 MB of permanently pinned kernel RAM under heavy load.
+PBUF_HIGH_WATER=4096
 PBUF_EMPTY_POOL=4096
 
 nss_log() { logger -t nss-offload "[+$(cut -d. -f1 /proc/uptime)s] $@"; }

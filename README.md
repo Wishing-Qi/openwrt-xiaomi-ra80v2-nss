@@ -103,6 +103,7 @@ flowchart LR
 | 2.4 GHz Wi-Fi | `Xiaomi-AX3000-2.4G-XXXX` | 开放无密码（`encryption 'none'`），`HE40`，国家码 `CN` |
 | 5 GHz Wi-Fi | `Xiaomi-AX3000-5G-XXXX` | 开放无密码（`encryption 'none'`），36 信道 **`HE160` (160 MHz)** |
 | Web 界面语言 | 简体中文 (`zh_cn`) | 首次启动默认设为中文，可在「系统 → 语言和界面」修改 |
+| ZRAM 交换分区 | `86 MB` (`zstd` 压缩) | 默认由 `99-ra80v2-nss` 自动配置，缓解 256 MB 内存压力 |
 
 > `XXXX` 为设备 MAC 地址后两字节（大写），首次启动时由 `/etc/uci-defaults/97-pzl8-wifi-ssid` 自动生成。
 >
